@@ -1,1 +1,32 @@
-# drive-planner
+# Drive Planner
+
+立ち寄り候補を地点間にストックし、気に入った場所をルートへ差し込みながら計画を育てる、モバイルファーストの試作品です。外部 API・認証・データベースは使用せず、変更はブラウザの `localStorage` に保存します。
+
+## ローカル起動
+
+Node.js 20 以降を用意し、次のコマンドを実行してください。
+
+```bash
+npm install
+npm run dev
+```
+
+表示された URL（通常は `http://localhost:5173/drive-planner/`）をブラウザで開きます。本番ビルドの確認は `npm run build`、続いて `npm run preview` で行えます。
+
+## GitHub Pages へ公開
+
+`vite.config.js` の `base` はリポジトリ名に合わせて `/drive-planner/` に設定済みです。
+
+1. リポジトリの **Settings → Pages → Build and deployment** で Source を **GitHub Actions** にします。
+2. `main` ブランチへ push すると、同梱の `.github/workflows/deploy.yml` がテスト・ビルド・公開を自動実行します。
+3. 手元で成果物だけを確認する場合は `npm run build` を実行し、生成された `dist` を確認します。
+
+別名のリポジトリへ移す場合は、`vite.config.js` の `base` をそのリポジトリ名に変更してください。
+
+## 操作
+
+- 地点間のボタンから候補を登録し、候補カードの「ルートに追加」でその区間へ差し込めます。
+- 通常地点は、右端のハンドルを長押ししてドラッグすると並べ替えられます。
+- 出発地点・帰着地点・メイン目的地は削除・並べ替えから保護されます。
+- 通常地点を外すと、統合された区間の候補へ戻ります。
+- 画面下部の「初期状態に戻す」で保存内容をリセットできます。
