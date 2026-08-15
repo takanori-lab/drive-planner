@@ -1,0 +1,102 @@
+import { useEffect, useRef, useState } from 'react';
+import { initialPlan, insertCandidate, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
+
+function loadPlan() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return saved?.points?.length >= 3 ? saved : initialPlan();
+  } catch { return initialPlan(); }
+}
+
+function PointCard({ point, index, total, onChange, onRemove, onReorder }) {
+  const [editing, setEditing] = useState(false);
+  const timer = useRef();
+  const dragging = useRef(false);
+  const move = (event) => {
+    if (!dragging.current) return;
+    event.preventDefault();
+    const cards = [...document.querySelectorAll('[data-point-index]')];
+    const target = cards.find((card) => {
+      const box = card.getBoundingClientRect();
+      return event.clientY >= box.top && event.clientY <= box.bottom;
+    });
+    if (target) onReorder(index, Number(target.dataset.pointIndex));
+  };
+  const end = (event) => {
+    clearTimeout(timer.current);
+    if (dragging.current) event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragging.current = false;
+    window.removeEventListener('pointermove', move);
+  };
+  const start = (event) => {
+    if (point.locked) return;
+    timer.current = setTimeout(() => {
+      dragging.current = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      window.addEventListener('pointermove', move, { passive: false });
+      navigator.vibrate?.(25);
+    }, 350);
+  };
+  useEffect(() => () => { clearTimeout(timer.current); window.removeEventListener('pointermove', move); });
+
+  return <article className={`point-card ${point.locked === 'main' ? 'main-point' : ''}`} data-point-index={index}>
+    <div className="point-icon" aria-hidden="true">{point.locked === 'main' ? '★' : index === 0 ? '●' : index === total - 1 ? '⌂' : '•'}</div>
+    <div className="point-copy">
+      <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
+      {editing ? <div className="memo-editor">
+        <textarea autoFocus value={point.memo} placeholder="この地点のメモ" onChange={(e) => onChange({ ...point, memo: e.target.value })} />
+        <button className="text-button" onClick={() => setEditing(false)}>完了</button>
+      </div> : <button className="memo-button" onClick={() => setEditing(true)}>{point.memo || '＋ メモを追加'}</button>}
+      {!point.locked && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
+    </div>
+    <button className="drag-handle" aria-label={`${point.name}を長押しして並べ替え`} disabled={!!point.locked}
+      onPointerDown={start} onPointerUp={end} onPointerCancel={end}>⠿</button>
+  </article>;
+}
+
+function Segment({ before, after, candidates, onAdd, onPromote, onDelete }) {
+  return <section className="segment">
+    <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
+    {candidates.map((candidate) => <article className="candidate" key={candidate.id}>
+      <span className="candidate-label">立ち寄り候補</span><h3>{candidate.name}</h3>
+      {candidate.memo && <p>{candidate.memo}</p>}
+      <div className="candidate-actions"><button className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button><button className="danger small" onClick={() => onDelete(candidate.id)}>削除</button></div>
+    </article>)}
+    <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
+  </section>;
+}
+
+function CandidateSheet({ route, onClose, onSubmit }) {
+  const [name, setName] = useState(''); const [memo, setMemo] = useState('');
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <form className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), memo.trim()); }}>
+      <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">NEW STOP</span><h2 id="sheet-title">立ち寄り候補を追加</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <p className="route-context">{route}</p>
+      <label>場所名<input autoFocus required maxLength="60" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：湖畔のパン屋" /></label>
+      <label>メモ <span>（任意）</span><textarea maxLength="200" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="気になること、寄りたい時間など" /></label>
+      <button className="primary submit" disabled={!name.trim()}>候補として保存</button>
+    </form>
+  </div>;
+}
+
+export default function App() {
+  const [plan, setPlan] = useState(loadPlan); const [sheetIndex, setSheetIndex] = useState(null); const [saved, setSaved] = useState(true);
+  useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
+  const updatePoint = (index, point) => setPlan((old) => ({ ...old, points: old.points.map((p, i) => i === index ? point : p) }));
+  const reset = () => { if (window.confirm('候補やメモをすべて消して、初期状態に戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
+  const reorder = (from, to) => { setPlan((old) => reorderPoint(old, from, to)); };
+  return <>
+    <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
+    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1><p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
+      <section className="timeline" aria-label="ドライブルート">
+        {plan.points.map((point, index) => <div key={point.id}>
+          <PointCard point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))} onReorder={reorder} />
+          {index < plan.points.length - 1 && (() => { const key = segmentKey(point, plan.points[index + 1]); return <Segment before={point} after={plan.points[index + 1]} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />; })()}
+        </div>)}
+      </section>
+      <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点の右側のハンドルを長押しして、そのまま移動します。</p></div></section>
+      <button className="reset" onClick={reset}>初期状態に戻す</button>
+    </main><footer>Drive Planner Prototype 01</footer>
+    {sheetIndex !== null && <CandidateSheet route={`${plan.points[sheetIndex].name} → ${plan.points[sheetIndex + 1].name}`} onClose={() => setSheetIndex(null)} onSubmit={(name, memo) => { const key = segmentKey(plan.points[sheetIndex], plan.points[sheetIndex + 1]); setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } })); setSheetIndex(null); }} />}
+  </>;
+}
