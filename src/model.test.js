@@ -26,4 +26,17 @@ describe('plan model', () => {
     expect(reorderPoint(plan, 1, 3)).toBe(plan);
     expect(reorderPoint(plan, 1, 2).points[2].name).toBe('休憩所');
   });
+
+  it('moves candidate segments with their starting point when reordering', () => {
+    const plan = initialPlan();
+    plan.points.splice(1, 0,
+      { id: 'stop', name: '休憩所', memo: '' },
+      { id: 'cafe', name: 'カフェ', memo: '' },
+    );
+    plan.candidates['stop::cafe'] = [{ id: 'park', name: '公園', memo: '' }];
+    const next = reorderPoint(plan, 1, 2);
+    expect(next.points.map((point) => point.id)).toEqual(['tokyo-start', 'cafe', 'stop', 'kawaguchiko', 'tokyo-goal']);
+    expect(next.candidates['stop::kawaguchiko']).toEqual(plan.candidates['stop::cafe']);
+    expect(next.candidates['stop::cafe']).toBeUndefined();
+  });
 });

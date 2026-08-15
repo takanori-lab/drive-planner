@@ -53,5 +53,15 @@ export function reorderPoint(plan, from, to) {
   const points = [...plan.points];
   points.splice(from, 1);
   points.splice(to, 0, point);
-  return { ...plan, points };
+
+  // A candidate collection follows the point from which its segment starts;
+  // otherwise the old adjacency key would make those candidates disappear.
+  const candidates = {};
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const before = points[index];
+    const after = points[index + 1];
+    const oldEntry = Object.entries(plan.candidates).find(([key]) => key.startsWith(`${before.id}::`));
+    if (oldEntry?.[1]?.length) candidates[segmentKey(before, after)] = oldEntry[1];
+  }
+  return { ...plan, points, candidates };
 }
