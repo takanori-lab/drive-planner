@@ -1,6 +1,6 @@
 import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
-import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
+import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useState } from 'react';
 import { initialPlan, insertCandidate, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
 
@@ -9,16 +9,17 @@ const sensors = [
     activationConstraints(event) {
       if (event.pointerType === 'touch') {
         return [
-          PointerActivationConstraints.Delay({
+          new PointerActivationConstraints.Delay({
             value: 300,
             tolerance: 8,
           }),
         ];
       }
 
-      return [PointerActivationConstraints.Distance({ value: 0 })];
+      return undefined;
     },
   }),
+  KeyboardSensor,
 ];
 
 function loadPlan() {
@@ -33,7 +34,7 @@ function PointCard({ point, index, total, onChange, onRemove }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: point.id,
     index,
-    disabled: !!point.locked,
+    disabled: point.locked ? { draggable: true } : false,
   });
 
   return <article ref={ref} className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
