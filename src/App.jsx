@@ -1,5 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { DragDropProvider } from '@dnd-kit/react';
+import { useSortable } from '@dnd-kit/react/sortable';
+import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
+import { useEffect, useState } from 'react';
 import { initialPlan, insertCandidate, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
+
+const sensors = [
+  PointerSensor.configure({
+    activationConstraints(event) {
+      if (event.pointerType === 'touch') {
+        return [
+          PointerActivationConstraints.Delay({
+            value: 300,
+            tolerance: 8,
+          }),
+        ];
+      }
+
+      return [PointerActivationConstraints.Distance({ value: 0 })];
+    },
+  }),
+];
 
 function loadPlan() {
   try {
@@ -8,38 +28,15 @@ function loadPlan() {
   } catch { return initialPlan(); }
 }
 
-function PointCard({ point, index, total, onChange, onRemove, onReorder }) {
+function PointCard({ point, index, total, onChange, onRemove }) {
   const [editing, setEditing] = useState(false);
-  const timer = useRef();
-  const dragging = useRef(false);
-  const move = (event) => {
-    if (!dragging.current) return;
-    event.preventDefault();
-    const cards = [...document.querySelectorAll('[data-point-index]')];
-    const target = cards.find((card) => {
-      const box = card.getBoundingClientRect();
-      return event.clientY >= box.top && event.clientY <= box.bottom;
-    });
-    if (target) onReorder(index, Number(target.dataset.pointIndex));
-  };
-  const end = (event) => {
-    clearTimeout(timer.current);
-    if (dragging.current) event.currentTarget.releasePointerCapture?.(event.pointerId);
-    dragging.current = false;
-    window.removeEventListener('pointermove', move);
-  };
-  const start = (event) => {
-    if (point.locked) return;
-    timer.current = setTimeout(() => {
-      dragging.current = true;
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      window.addEventListener('pointermove', move, { passive: false });
-      navigator.vibrate?.(25);
-    }, 350);
-  };
-  useEffect(() => () => { clearTimeout(timer.current); window.removeEventListener('pointermove', move); });
+  const { ref, handleRef, isDragging } = useSortable({
+    id: point.id,
+    index,
+    disabled: !!point.locked,
+  });
 
-  return <article className={`point-card ${point.locked === 'main' ? 'main-point' : ''}`} data-point-index={index}>
+  return <article ref={ref} className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
     <div className="point-icon" aria-hidden="true">{point.locked === 'main' ? '★' : index === 0 ? '●' : index === total - 1 ? '⌂' : '•'}</div>
     <div className="point-copy">
       <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
@@ -49,8 +46,7 @@ function PointCard({ point, index, total, onChange, onRemove, onReorder }) {
       </div> : <button className="memo-button" onClick={() => setEditing(true)}>{point.memo || '＋ メモを追加'}</button>}
       {!point.locked && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
     </div>
-    <button className="drag-handle" aria-label={`${point.name}を長押しして並べ替え`} disabled={!!point.locked}
-      onPointerDown={start} onPointerUp={end} onPointerCancel={end}>⠿</button>
+    <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!!point.locked}>⠿</button>
   </article>;
 }
 
@@ -84,17 +80,22 @@ export default function App() {
   useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
   const updatePoint = (index, point) => setPlan((old) => ({ ...old, points: old.points.map((p, i) => i === index ? point : p) }));
   const reset = () => { if (window.confirm('候補やメモをすべて消して、初期状態に戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
-  const reorder = (from, to) => { setPlan((old) => reorderPoint(old, from, to)); };
+  const finishReorder = ({ operation }) => {
+    const { source } = operation;
+    if (source && source.initialIndex !== source.index) setPlan((old) => reorderPoint(old, source.initialIndex, source.index));
+  };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
     <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1><p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
-      <section className="timeline" aria-label="ドライブルート">
-        {plan.points.map((point, index) => <div key={point.id}>
-          <PointCard point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))} onReorder={reorder} />
-          {index < plan.points.length - 1 && (() => { const key = segmentKey(point, plan.points[index + 1]); return <Segment before={point} after={plan.points[index + 1]} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />; })()}
-        </div>)}
-      </section>
-      <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点の右側のハンドルを長押しして、そのまま移動します。</p></div></section>
+      <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
+        <section className="timeline" aria-label="ドライブルート">
+          {plan.points.map((point, index) => <div key={point.id}>
+            <PointCard point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))} />
+            {index < plan.points.length - 1 && (() => { const key = segmentKey(point, plan.points[index + 1]); return <Segment before={point} after={plan.points[index + 1]} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />; })()}
+          </div>)}
+        </section>
+      </DragDropProvider>
+      <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
       <button className="reset" onClick={reset}>初期状態に戻す</button>
     </main><footer>Drive Planner Prototype 01</footer>
     {sheetIndex !== null && <CandidateSheet route={`${plan.points[sheetIndex].name} → ${plan.points[sheetIndex + 1].name}`} onClose={() => setSheetIndex(null)} onSubmit={(name, memo) => { const key = segmentKey(plan.points[sheetIndex], plan.points[sheetIndex + 1]); setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } })); setSheetIndex(null); }} />}
