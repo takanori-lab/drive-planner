@@ -1,7 +1,25 @@
 import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
+import { PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useState } from 'react';
 import { initialPlan, insertCandidate, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
+
+const sensors = [
+  PointerSensor.configure({
+    activationConstraints(event) {
+      if (event.pointerType === 'touch') {
+        return [
+          PointerActivationConstraints.Delay({
+            value: 300,
+            tolerance: 8,
+          }),
+        ];
+      }
+
+      return [PointerActivationConstraints.Distance({ value: 0 })];
+    },
+  }),
+];
 
 function loadPlan() {
   try {
@@ -16,13 +34,6 @@ function PointCard({ point, index, total, onChange, onRemove }) {
     id: point.id,
     index,
     disabled: !!point.locked,
-    sensors: {
-      pointer: {
-        activationConstraint: ({ pointerType }) => pointerType === 'touch'
-          ? { delay: 300, tolerance: 8 }
-          : { distance: 0 },
-      },
-    },
   });
 
   return <article ref={ref} className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
@@ -76,7 +87,7 @@ export default function App() {
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
     <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1><p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
-      <DragDropProvider onDragEnd={finishReorder}>
+      <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
           {plan.points.map((point, index) => <div key={point.id}>
             <PointCard point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))} />
