@@ -16,16 +16,16 @@
 {
   "requestId": "5eca122f-c098-4690-9575-5e906c3f86af",
   "plan": {
-    "title": "富士山周辺ドライブ",
-    "date": "2026-08-29",
-    "mainPoint": { "name": "富士山", "googleMapsUrl": "", "locationNote": "", "memo": "" }
+    "title": "架空の星めぐりドライブ",
+    "date": "2099-12-31",
+    "mainPoint": { "name": "星見ヶ原", "googleMapsUrl": "", "locationNote": "", "memo": "" }
   },
   "segment": {
-    "before": { "name": "東京駅", "googleMapsUrl": "", "locationNote": "", "memo": "" },
-    "after": { "name": "河口湖", "googleMapsUrl": "", "locationNote": "", "memo": "" }
+    "before": { "name": "月影広場", "googleMapsUrl": "", "locationNote": "", "memo": "" },
+    "after": { "name": "虹空湖", "googleMapsUrl": "", "locationNote": "", "memo": "" }
   },
   "existingCandidates": [{ "name": "候補例", "locationNote": "" }],
-  "preferences": { "freeText": "景色がいいところ", "useWebSearch": false }
+  "preferences": { "freeText": "空想の景色を楽しめるところ", "useWebSearch": false }
 }
 ```
 
