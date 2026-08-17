@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { buildChatGptPrompt, buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { buildChatGptPrompt, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 
 const sensors = [
   PointerSensor.configure({
@@ -111,7 +111,6 @@ function Segment({ before, after, candidates, onAdd, onAsk, onEdit, onMove, onPr
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
     <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>
-    <a className="segment-maps-link" href={buildGoogleMapsDirectionsUrl(before, after)} target="_blank" rel="noopener noreferrer">↗ Googleマップで経路を見る</a>
   </section>;
 }
 
