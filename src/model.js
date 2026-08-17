@@ -51,14 +51,6 @@ export function buildGoogleMapsSearchUrl(place) {
   return `https://www.google.com/maps/search/?${params}`;
 }
 
-export function buildGoogleMapsDirectionsUrl(fromPoint, toPoint) {
-  const origin = buildGoogleMapsQuery(fromPoint);
-  const destination = buildGoogleMapsQuery(toPoint);
-  if (!origin || !destination) return '';
-  const params = new URLSearchParams({ api: '1', origin, destination, travelmode: 'driving' });
-  return `https://www.google.com/maps/dir/?${params}`;
-}
-
 function normalizePlaceMapsUrl(place) {
   const locationNote = place?.locationNote ?? '';
   const existingUrl = place?.googleMapsUrl ?? '';
