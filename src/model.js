@@ -13,6 +13,52 @@ export const initialPlan = () => ({
 export const segmentKey = (a, b) => `${a.id}::${b.id}`;
 export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+function formatJapaneseDate(date) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+  if (!match) return '';
+  return `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日`;
+}
+
+export function buildChatGptPrompt(plan, segmentIndex, extraRequest = '') {
+  const before = plan.points[segmentIndex];
+  const after = plan.points[segmentIndex + 1];
+  if (!before || !after) return '';
+  const date = formatJapaneseDate(plan.date);
+  const route = plan.points.map((point) => point.name).join(' → ');
+  const main = plan.points.find((point) => point.locked === 'main');
+  const candidates = plan.candidates?.[segmentKey(before, after)] || [];
+  const request = extraRequest.trim();
+  const intro = date ? `${date}に車で「${plan.title}」をします。` : `車で「${plan.title}」をします。`;
+  const candidateSection = candidates.length ? `\nすでに候補になっている場所：\n${candidates.map((candidate) => `- ${candidate.name}`).join('\n')}\n` : '';
+  const requestSection = request ? `\n追加の希望：\n${request}\n` : '';
+
+  return `${intro}
+
+現在のルートは、
+${route}
+です。
+
+${main ? `メインの目的地は「${main.name}」です。\n\n` : ''}今回、
+「${before.name} → ${after.name}」
+の間で立ち寄れる場所を探しています。
+${candidateSection}${requestSection}
+有名観光地を並べるだけではなく、車だからこそ寄りやすい場所、少し変わった施設や場所、景色のいい道・スポット、地元らしい場所など、「予定していなかったけれど寄ったら面白そう」と思える候補を5件程度提案してください。
+
+大きくルートを外れる場所は避け、すでに候補になっている場所との重複もできるだけ避けてください。
+
+各候補について、
+・場所名
+・どんな場所か
+・この区間で寄る理由
+・おおよその寄り道感
+・営業時間、予約、営業状況など確認した方がよい点
+を簡潔に教えてください。
+
+最後に、このドライブとの相性が特に良い2件を選んでください。
+
+必要であればWeb検索を使い、現在営業しているかなど最新情報も確認してください。`;
+}
+
 export function createPlan({ title, date, startName, mainName, goalName }) {
   const planId = makeId();
   return {
