@@ -29,15 +29,10 @@ function loadPlan() {
   } catch { return initialPlan(); }
 }
 
-function PointCard({ point, index, total, onChange, onRemove }) {
+function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragging }) {
   const [editing, setEditing] = useState(false);
-  const { ref, handleRef, isDragging } = useSortable({
-    id: point.id,
-    index,
-    disabled: point.locked ? { draggable: true } : false,
-  });
 
-  return <article ref={ref} className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
+  return <article className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
     <div className="point-icon" aria-hidden="true">{point.locked === 'main' ? '★' : index === 0 ? '●' : index === total - 1 ? '⌂' : '•'}</div>
     <div className="point-copy">
       <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
@@ -49,6 +44,19 @@ function PointCard({ point, index, total, onChange, onRemove }) {
     </div>
     <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!!point.locked}>⠿</button>
   </article>;
+}
+
+function RouteItem({ point, index, total, children, onChange, onRemove }) {
+  const { ref, handleRef, isDragging } = useSortable({
+    id: point.id,
+    index,
+    disabled: point.locked ? { draggable: true } : false,
+  });
+
+  return <div ref={ref} className={`route-item ${isDragging ? 'is-dragging' : ''}`}>
+    <PointCard point={point} index={index} total={total} onChange={onChange} onRemove={onRemove} handleRef={handleRef} isDragging={isDragging} />
+    {children}
+  </div>;
 }
 
 function Segment({ before, after, candidates, onAdd, onPromote, onDelete }) {
@@ -90,10 +98,9 @@ export default function App() {
     <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1><p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
-          {plan.points.map((point, index) => <div key={point.id}>
-            <PointCard point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))} />
+          {plan.points.map((point, index) => <RouteItem key={point.id} point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))}>
             {index < plan.points.length - 1 && (() => { const key = segmentKey(point, plan.points[index + 1]); return <Segment before={point} after={plan.points[index + 1]} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />; })()}
-          </div>)}
+          </RouteItem>)}
         </section>
       </DragDropProvider>
       <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
