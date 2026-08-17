@@ -23,8 +23,34 @@ describe('plan model', () => {
     const plan = initialPlan();
     plan.points.splice(1, 0, { id: 'stop', name: '休憩所', memo: '' }, { id: 'cafe', name: 'カフェ', memo: '' });
     expect(reorderPoint(plan, 0, 1)).toBe(plan);
-    expect(reorderPoint(plan, 1, 3)).toBe(plan);
+    expect(reorderPoint(plan, 1, 3).points.map((point) => point.id)).toEqual([
+      'tokyo-start', 'cafe', 'kawaguchiko', 'stop', 'tokyo-goal',
+    ]);
     expect(reorderPoint(plan, 1, 2).points[2].name).toBe('休憩所');
+  });
+
+  it('moves normal points to either side of MAIN while keeping candidates on their starting point', () => {
+    const plan = initialPlan();
+    plan.points.splice(1, 0,
+      { id: 'stop', name: '休憩所', memo: '' },
+      { id: 'cafe', name: 'カフェ', memo: '' },
+    );
+    plan.points.splice(4, 0, { id: 'park', name: '公園', memo: '' });
+    plan.candidates['stop::cafe'] = [{ id: 'shop', name: '売店', memo: '' }];
+
+    const afterMain = reorderPoint(plan, 1, 3);
+    expect(afterMain.points.map((point) => point.id)).toEqual([
+      'tokyo-start', 'cafe', 'kawaguchiko', 'stop', 'park', 'tokyo-goal',
+    ]);
+    expect(afterMain.candidates['stop::park']).toEqual(plan.candidates['stop::cafe']);
+    expect(afterMain.candidates['stop::cafe']).toBeUndefined();
+
+    const beforeMain = reorderPoint(afterMain, 4, 2);
+    expect(beforeMain.points.map((point) => point.id)).toEqual([
+      'tokyo-start', 'cafe', 'park', 'kawaguchiko', 'stop', 'tokyo-goal',
+    ]);
+    expect(beforeMain.candidates['stop::tokyo-goal']).toEqual(plan.candidates['stop::cafe']);
+    expect(Object.values(beforeMain.candidates).flat()).toHaveLength(1);
   });
 
   it('moves candidate segments with their starting point when reordering', () => {

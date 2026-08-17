@@ -49,7 +49,7 @@ export function removePoint(plan, pointIndex) {
 
 export function reorderPoint(plan, from, to) {
   const point = plan.points[from];
-  if (!point || point.locked || plan.points[to]?.locked || to <= 0 || to >= plan.points.length - 1 || from === to) return plan;
+  if (!point || point.locked || to <= 0 || to >= plan.points.length - 1 || from === to) return plan;
   const points = [...plan.points];
   points.splice(from, 1);
   points.splice(to, 0, point);
