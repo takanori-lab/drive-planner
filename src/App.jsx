@@ -94,7 +94,7 @@ function Segment({ before, after, candidates, onAdd, onAsk, onEdit, onMove, onPr
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
-    <button className="ask-chatgpt" onClick={onAsk}>✨ ChatGPTに相談</button>
+    <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>
   </section>;
 }
 
@@ -128,7 +128,8 @@ function ChatGptSheet({ plan, segmentIndex, onClose }) {
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="sheet chatgpt-sheet" role="dialog" aria-modal="true" aria-labelledby="chatgpt-sheet-title">
       <div className="sheet-grip" />
-      <div className="sheet-head"><div><span className="eyebrow">ASK CHATGPT</span><h2 id="chatgpt-sheet-title">この区間の候補をChatGPTに相談</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <div className="sheet-head"><div><span className="eyebrow">FIND STOPS</span><h2 id="chatgpt-sheet-title">この区間の候補を探す</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <p className="chatgpt-description">ChatGPTで候補を探すためのプロンプトを作成します。</p>
       <p className="route-context">{before.name} → {after.name}</p>
       <label>追加の希望 <span>（任意）</span><input maxLength="120" value={extraRequest} onChange={updateRequest} placeholder="例：景色がいい場所が気になる" /></label>
       <label>生成するプロンプト<textarea className="prompt-textarea" value={prompt} onChange={(event) => { setPrompt(event.target.value); setCopyState('idle'); }} /></label>

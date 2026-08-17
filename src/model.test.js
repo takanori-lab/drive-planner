@@ -6,7 +6,8 @@ describe('plan model', () => {
     const plan = initialPlan();
     plan.title = '富士山周辺ドライブ';
     plan.date = '2026-08-29';
-    plan.points.splice(1, 0, { id: 'bakery', name: '湖畔のパン屋', memo: '' });
+    plan.points.splice(1, 0, { id: 'bakery', name: '湖畔のパン屋', memo: ' 河口湖の北側にある店舗 ' });
+    plan.points[2].memo = '五合目方面へ向かう目的地';
     plan.candidates[segmentKey(plan.points[1], plan.points[2])] = [
       { id: 'cake', name: '湖畔のケーキ屋', memo: '' },
       { id: 'view', name: '展望台', memo: '' },
@@ -17,10 +18,20 @@ describe('plan model', () => {
     expect(prompt).toContain('東京駅 → 湖畔のパン屋 → 河口湖 → 東京駅');
     expect(prompt).toContain('「湖畔のパン屋 → 河口湖」');
     expect(prompt).toContain('メインの目的地は「河口湖」');
+    expect(prompt).toContain('地点の補足：\n- 湖畔のパン屋：河口湖の北側にある店舗\n- 河口湖：五合目方面へ向かう目的地');
     expect(prompt).toContain('- 湖畔のケーキ屋\n- 展望台');
     expect(prompt).toContain('追加の希望：\n景色がいい場所が気になる');
-    expect(prompt).toContain('5件程度');
-    expect(prompt).toContain('相性が特に良い2件');
+    expect(prompt).toContain('候補を5件提案してください');
+    expect(prompt).not.toContain('5件程度');
+    expect(prompt).not.toContain('相性が特に良い2件');
+    expect(prompt).toContain('統一されたMarkdown形式');
+    expect(prompt).toContain('### 1. 場所名');
+    expect(prompt).toContain('どんな場所：');
+    expect(prompt).toContain('この区間で寄る理由：');
+    expect(prompt).toContain('寄り道感：');
+    expect(prompt).toContain('確認事項：');
+    expect(prompt).toContain('### 5.');
+    expect(prompt).toContain('営業時間、予約、定休日、駐車場、季節営業');
   });
 
   it('builds a prompt without optional date, candidates, or request', () => {
@@ -32,6 +43,27 @@ describe('plan model', () => {
     expect(prompt).not.toContain('年');
     expect(prompt).not.toContain('すでに候補になっている場所：');
     expect(prompt).not.toContain('追加の希望：');
+    expect(prompt).not.toContain('地点の補足：');
+  });
+
+  it('includes only a memo from the before point when the after memo is empty', () => {
+    const plan = initialPlan();
+    plan.points[0].memo = '丸の内側から出発';
+
+    const prompt = buildChatGptPrompt(plan, 0);
+
+    expect(prompt).toContain('地点の補足：\n- 東京駅：丸の内側から出発');
+    expect(prompt).not.toContain('- 河口湖：');
+  });
+
+  it('includes only a memo from the after point when the before memo is empty', () => {
+    const plan = initialPlan();
+    plan.points[1].memo = '湖の北岸を中心に観光';
+
+    const prompt = buildChatGptPrompt(plan, 0);
+
+    expect(prompt).toContain('地点の補足：\n- 河口湖：湖の北岸を中心に観光');
+    expect(prompt).not.toContain('- 東京駅：');
   });
 
   it('creates a new plan with unique role-specific points and no candidates', () => {
