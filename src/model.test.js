@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatGptPrompt, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, moveCandidate, removePoint, reorderPoint, segmentKey, updateCandidate } from './model';
+import { buildChatGptPrompt, buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate } from './model';
 
 describe('plan model', () => {
   it('builds a ChatGPT prompt with all drive context', () => {
@@ -115,7 +115,7 @@ describe('plan model', () => {
 
     const next = updateCandidate(plan, key, 'bakery', { name: '湖畔のベーカリー', locationNote: '河口湖の北側', memo: '9時ごろ寄りたい' });
 
-    expect(next.candidates[key][0]).toEqual({ id: 'bakery', name: '湖畔のベーカリー', locationNote: '河口湖の北側', memo: '9時ごろ寄りたい' });
+    expect(next.candidates[key][0]).toEqual({ id: 'bakery', name: '湖畔のベーカリー', googleMapsUrl: '', locationNote: '河口湖の北側', memo: '9時ごろ寄りたい' });
     expect(next.candidates[key][1]).toBe(plan.candidates[key][1]);
     expect(next.candidates[otherKey]).toBe(plan.candidates[otherKey]);
     expect(Object.keys(next.candidates)).toEqual(Object.keys(plan.candidates));
@@ -309,7 +309,7 @@ describe('plan model', () => {
     plan.candidates[key] = [{ id: 'falls', name: '田原の滝', locationNote: '都留市', memo: '景色' }];
 
     const next = updateCandidate(plan, key, 'falls', { name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' });
-    expect(next.candidates[key][0]).toEqual({ id: 'falls', name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' });
+    expect(next.candidates[key][0]).toEqual({ id: 'falls', name: '田原の滝', googleMapsUrl: '', locationNote: '山梨県都留市', memo: '景色が良さそう' });
     expect(Object.keys(next.candidates)).toEqual([key]);
   });
 
@@ -339,6 +339,78 @@ describe('plan model', () => {
     expect(prompt).toContain('地点メモ：\n- 東京駅：美味しい');
     expect(prompt).toContain('- 湖畔のケーキ屋（河口湖町○○）\n- 展望台');
     expect(prompt).toContain('別の場所を勝手に想定せず、必要な追加情報を確認してください');
+  });
+
+  it('adds an empty Google Maps URL to initial and newly created points', () => {
+    expect(initialPlan().points.every((point) => point.googleMapsUrl === '')).toBe(true);
+    const created = createPlan({ title: '旅', date: '2026-09-01', startName: '東京', mainName: '富士山', goalName: '横浜' });
+    expect(created.points.map((point) => point.googleMapsUrl)).toEqual(['', '', '']);
+  });
+
+  it('recognizes supported Google Maps URLs and rejects unsafe or unrelated URLs', () => {
+    expect(isGoogleMapsUrl('https://maps.app.goo.gl/abc')).toBe(true);
+    expect(isGoogleMapsUrl('https://www.google.com/maps/place/test')).toBe(true);
+    expect(isGoogleMapsUrl('https://maps.google.com/?q=test')).toBe(true);
+    expect(isGoogleMapsUrl('https://goo.gl/maps/abc')).toBe(true);
+    expect(safeGoogleMapsUrl(' javascript:alert(1) ')).toBe('');
+    expect(safeGoogleMapsUrl('https://example.com/maps')).toBe('');
+  });
+
+  it('migrates only a whole legacy Maps URL and supplies missing fields', () => {
+    const plan = initialPlan();
+    plan.points = [
+      { id: 'url', name: 'URL', locationNote: 'https://maps.app.goo.gl/abc', memo: '' },
+      { id: 'note', name: '補足', locationNote: '河口湖の北側', memo: '' },
+      { id: 'mixed', name: '混在', locationNote: '河口湖の北側 https://maps.app.goo.gl/abc', memo: '' },
+    ];
+    plan.candidates = { segment: [{ id: 'candidate', name: '候補', locationNote: 'https://goo.gl/maps/xyz', memo: '' }] };
+    const normalized = normalizePlanMapsUrls(plan);
+    expect(normalized.points[0]).toMatchObject({ googleMapsUrl: 'https://maps.app.goo.gl/abc', locationNote: '' });
+    expect(normalized.points[1]).toMatchObject({ googleMapsUrl: '', locationNote: '河口湖の北側' });
+    expect(normalized.points[2]).toMatchObject({ googleMapsUrl: '', locationNote: '河口湖の北側 https://maps.app.goo.gl/abc' });
+    expect(normalized.candidates.segment[0]).toMatchObject({ googleMapsUrl: 'https://goo.gl/maps/xyz', locationNote: '' });
+  });
+
+  it('builds encoded search and driving directions URLs without shared URLs', () => {
+    const search = new URL(buildGoogleMapsSearchUrl({ name: 'Lake Bake', locationNote: '河口湖の北側' }));
+    expect(search.searchParams.get('query')).toBe('Lake Bake 河口湖の北側');
+    expect(buildGoogleMapsSearchUrl({ name: '  ', locationNote: '河口湖' })).toBe('');
+    const directions = new URL(buildGoogleMapsDirectionsUrl(
+      { name: '東京駅', locationNote: '丸の内' },
+      { name: '湖畔のパン屋', googleMapsUrl: 'https://maps.app.goo.gl/short', locationNote: 'https://maps.app.goo.gl/short' },
+    ));
+    expect(directions.searchParams.get('origin')).toBe('東京駅 丸の内');
+    expect(directions.searchParams.get('destination')).toBe('湖畔のパン屋');
+    expect(directions.searchParams.get('travelmode')).toBe('driving');
+    expect(directions.href).not.toContain('short');
+  });
+
+  it('preserves and updates Google Maps URLs through candidate operations', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    const url = 'https://maps.app.goo.gl/falls';
+    plan.candidates[key] = [{ id: 'falls', name: '田原の滝', googleMapsUrl: url, locationNote: '都留市', memo: '' }];
+    const inserted = insertCandidate(plan, 0, 'falls');
+    expect(inserted.points[1].googleMapsUrl).toBe(url);
+    expect(removePoint(inserted, 1).candidates[key][0].googleMapsUrl).toBe(url);
+    const updated = updateCandidate(plan, key, 'falls', { name: '田原の滝', googleMapsUrl: 'https://goo.gl/maps/new', locationNote: '都留市', memo: '' });
+    expect(updated.candidates[key][0].googleMapsUrl).toBe('https://goo.gl/maps/new');
+    expect(moveCandidate(plan, key, segmentKey(plan.points[1], plan.points[2]), 'falls').candidates['kawaguchiko::tokyo-goal'][0].googleMapsUrl).toBe(url);
+  });
+
+  it('includes point and candidate Maps URLs in the prompt without mixing memo roles', () => {
+    const plan = initialPlan();
+    plan.points[0].googleMapsUrl = 'https://maps.app.goo.gl/start';
+    plan.points[0].locationNote = '丸の内側';
+    plan.points[0].memo = '朝出発';
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    plan.candidates[key] = [{ id: 'cafe', name: 'カフェ', googleMapsUrl: 'https://goo.gl/maps/cafe', locationNote: '', memo: '静か' }];
+    const prompt = buildChatGptPrompt(plan, 0);
+    expect(prompt).toContain('- Google Maps：https://maps.app.goo.gl/start');
+    expect(prompt).toContain('- 補足：丸の内側');
+    expect(prompt).toContain('地点メモ：\n- 東京駅：朝出発');
+    expect(prompt).toContain('Google Maps：https://goo.gl/maps/cafe');
+    expect(prompt).not.toContain('地点の場所情報：\n- 東京駅：朝出発');
   });
 
 });
