@@ -6,10 +6,11 @@ describe('plan model', () => {
     const plan = initialPlan();
     plan.title = '富士山周辺ドライブ';
     plan.date = '2026-08-29';
-    plan.points.splice(1, 0, { id: 'bakery', name: '湖畔のパン屋', memo: ' 河口湖の北側にある店舗 ' });
-    plan.points[2].memo = '五合目方面へ向かう目的地';
+    plan.points.splice(1, 0, { id: 'bakery', name: '湖畔のパン屋', locationNote: ' 河口湖の北側にある店舗 ', memo: '美味しい' });
+    plan.points[2].locationNote = '富士スバルライン五合目';
+    plan.points[2].memo = '写真を撮りたい';
     plan.candidates[segmentKey(plan.points[1], plan.points[2])] = [
-      { id: 'cake', name: '湖畔のケーキ屋', memo: '' },
+      { id: 'cake', name: '湖畔のケーキ屋', locationNote: '河口湖町○○', memo: '' },
       { id: 'view', name: '展望台', memo: '' },
     ];
     const prompt = buildChatGptPrompt(plan, 1, '景色がいい場所が気になる');
@@ -18,8 +19,9 @@ describe('plan model', () => {
     expect(prompt).toContain('東京駅 → 湖畔のパン屋 → 河口湖 → 東京駅');
     expect(prompt).toContain('「湖畔のパン屋 → 河口湖」');
     expect(prompt).toContain('メインの目的地は「河口湖」');
-    expect(prompt).toContain('地点の補足：\n- 湖畔のパン屋：河口湖の北側にある店舗\n- 河口湖：五合目方面へ向かう目的地');
-    expect(prompt).toContain('- 湖畔のケーキ屋\n- 展望台');
+    expect(prompt).toContain('地点の場所情報：\n- 湖畔のパン屋：河口湖の北側にある店舗\n- 河口湖：富士スバルライン五合目');
+    expect(prompt).toContain('地点メモ：\n- 湖畔のパン屋：美味しい\n- 河口湖：写真を撮りたい');
+    expect(prompt).toContain('- 湖畔のケーキ屋（河口湖町○○）\n- 展望台');
     expect(prompt).toContain('追加の希望：\n景色がいい場所が気になる');
     expect(prompt).toContain('候補を5件提案してください');
     expect(prompt).not.toContain('5件程度');
@@ -43,26 +45,29 @@ describe('plan model', () => {
     expect(prompt).not.toContain('年');
     expect(prompt).not.toContain('すでに候補になっている場所：');
     expect(prompt).not.toContain('追加の希望：');
-    expect(prompt).not.toContain('地点の補足：');
+    expect(prompt).not.toContain('地点の場所情報：');
+    expect(prompt).not.toContain('地点メモ：');
   });
 
-  it('includes only a memo from the before point when the after memo is empty', () => {
+  it('includes only a memo from the before point as a separate memo section', () => {
     const plan = initialPlan();
     plan.points[0].memo = '丸の内側から出発';
 
     const prompt = buildChatGptPrompt(plan, 0);
 
-    expect(prompt).toContain('地点の補足：\n- 東京駅：丸の内側から出発');
+    expect(prompt).toContain('地点メモ：\n- 東京駅：丸の内側から出発');
+    expect(prompt).not.toContain('地点の場所情報：');
     expect(prompt).not.toContain('- 河口湖：');
   });
 
-  it('includes only a memo from the after point when the before memo is empty', () => {
+  it('includes only a memo from the after point as a separate memo section', () => {
     const plan = initialPlan();
     plan.points[1].memo = '湖の北岸を中心に観光';
 
     const prompt = buildChatGptPrompt(plan, 0);
 
-    expect(prompt).toContain('地点の補足：\n- 河口湖：湖の北岸を中心に観光');
+    expect(prompt).toContain('地点メモ：\n- 河口湖：湖の北岸を中心に観光');
+    expect(prompt).not.toContain('地点の場所情報：');
     expect(prompt).not.toContain('- 東京駅：');
   });
 
@@ -77,10 +82,10 @@ describe('plan model', () => {
 
     expect(plan.title).toBe('富士山周辺ドライブ');
     expect(plan.date).toBe('2026-09-20');
-    expect(plan.points.map(({ name, locked, memo }) => ({ name, locked, memo }))).toEqual([
-      { name: '東京駅', locked: 'start', memo: '' },
-      { name: '富士山', locked: 'main', memo: '' },
-      { name: '東京駅', locked: 'goal', memo: '' },
+    expect(plan.points.map(({ name, locked, locationNote, memo }) => ({ name, locked, locationNote, memo }))).toEqual([
+      { name: '東京駅', locked: 'start', locationNote: '', memo: '' },
+      { name: '富士山', locked: 'main', locationNote: '', memo: '' },
+      { name: '東京駅', locked: 'goal', locationNote: '', memo: '' },
     ]);
     expect(new Set(plan.points.map((point) => point.id)).size).toBe(3);
     expect(plan.candidates).toEqual({});
@@ -108,9 +113,9 @@ describe('plan model', () => {
       [otherKey]: [{ id: 'park', name: '公園', memo: '散歩' }],
     };
 
-    const next = updateCandidate(plan, key, 'bakery', { name: '湖畔のベーカリー', memo: '9時ごろ寄りたい' });
+    const next = updateCandidate(plan, key, 'bakery', { name: '湖畔のベーカリー', locationNote: '河口湖の北側', memo: '9時ごろ寄りたい' });
 
-    expect(next.candidates[key][0]).toEqual({ id: 'bakery', name: '湖畔のベーカリー', memo: '9時ごろ寄りたい' });
+    expect(next.candidates[key][0]).toEqual({ id: 'bakery', name: '湖畔のベーカリー', locationNote: '河口湖の北側', memo: '9時ごろ寄りたい' });
     expect(next.candidates[key][1]).toBe(plan.candidates[key][1]);
     expect(next.candidates[otherKey]).toBe(plan.candidates[otherKey]);
     expect(Object.keys(next.candidates)).toEqual(Object.keys(plan.candidates));
@@ -281,4 +286,59 @@ describe('plan model', () => {
       'c1', 'c2', 'c3', 'c4',
     ]);
   });
+
+  it('adds an empty locationNote to every initial point', () => {
+    expect(initialPlan().points.every((point) => point.locationNote === '')).toBe(true);
+  });
+
+  it('preserves locationNote when a candidate joins and leaves the route', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    plan.candidates[key] = [{ id: 'falls', name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' }];
+
+    const inserted = insertCandidate(plan, 0, 'falls');
+    expect(inserted.points[1]).toMatchObject({ id: 'falls', locationNote: '山梨県都留市', memo: '景色が良さそう' });
+
+    const removed = removePoint(inserted, 1);
+    expect(removed.candidates[key][0]).toMatchObject({ name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' });
+  });
+
+  it('updates candidate locationNote without changing its id or segment', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    plan.candidates[key] = [{ id: 'falls', name: '田原の滝', locationNote: '都留市', memo: '景色' }];
+
+    const next = updateCandidate(plan, key, 'falls', { name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' });
+    expect(next.candidates[key][0]).toEqual({ id: 'falls', name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' });
+    expect(Object.keys(next.candidates)).toEqual([key]);
+  });
+
+  it('preserves locationNote while moving a candidate', () => {
+    const plan = initialPlan();
+    const fromKey = segmentKey(plan.points[0], plan.points[1]);
+    const toKey = segmentKey(plan.points[1], plan.points[2]);
+    plan.candidates[fromKey] = [{ id: 'falls', name: '田原の滝', locationNote: '山梨県都留市', memo: '' }];
+
+    expect(moveCandidate(plan, fromKey, toKey, 'falls').candidates[toKey][0].locationNote).toBe('山梨県都留市');
+  });
+
+  it('keeps location information and memo distinct in prompts and supports legacy data', () => {
+    const plan = initialPlan();
+    delete plan.points[0].locationNote;
+    plan.points[0].memo = '美味しい';
+    plan.points[1].locationNote = '富士スバルライン五合目';
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    plan.candidates[key] = [
+      { id: 'cake', name: '湖畔のケーキ屋', locationNote: '河口湖町○○', memo: '' },
+      { id: 'view', name: '展望台', memo: '' },
+    ];
+
+    const prompt = buildChatGptPrompt(plan, 0);
+    expect(prompt).toContain('地点の場所情報：\n- 河口湖：富士スバルライン五合目');
+    expect(prompt).not.toContain('地点の場所情報：\n- 東京駅：美味しい');
+    expect(prompt).toContain('地点メモ：\n- 東京駅：美味しい');
+    expect(prompt).toContain('- 湖畔のケーキ屋（河口湖町○○）\n- 展望台');
+    expect(prompt).toContain('別の場所を勝手に想定せず、必要な追加情報を確認してください');
+  });
+
 });
