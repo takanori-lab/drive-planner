@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useState } from 'react';
-import { initialPlan, insertCandidate, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
+import { initialPlan, insertCandidate, isDraggable, isRemovable, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
 
 const sensors = [
   PointerSensor.configure({
@@ -40,9 +40,9 @@ function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragg
         <textarea autoFocus value={point.memo} placeholder="この地点のメモ" onChange={(e) => onChange({ ...point, memo: e.target.value })} />
         <button className="text-button" onClick={() => setEditing(false)}>完了</button>
       </div> : <button className="memo-button" onClick={() => setEditing(true)}>{point.memo || '＋ メモを追加'}</button>}
-      {!point.locked && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
+      {isRemovable(point) && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
     </div>
-    <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!!point.locked}>⠿</button>
+    <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!isDraggable(point)}>⠿</button>
   </article>;
 }
 
@@ -50,7 +50,7 @@ function RouteItem({ point, index, total, children, onChange, onRemove }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: point.id,
     index,
-    disabled: point.locked ? { draggable: true } : false,
+    disabled: !isDraggable(point) ? { draggable: true } : false,
   });
 
   return <div ref={ref} className={`route-item ${isDragging ? 'is-dragging' : ''}`}>
@@ -103,7 +103,7 @@ export default function App() {
           </RouteItem>)}
         </section>
       </DragDropProvider>
-      <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
+      <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点またはMAIN地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
       <button className="reset" onClick={reset}>初期状態に戻す</button>
     </main><footer>Drive Planner Prototype 01</footer>
     {sheetIndex !== null && <CandidateSheet route={`${plan.points[sheetIndex].name} → ${plan.points[sheetIndex + 1].name}`} onClose={() => setSheetIndex(null)} onSubmit={(name, memo) => { const key = segmentKey(plan.points[sheetIndex], plan.points[sheetIndex + 1]); setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } })); setSheetIndex(null); }} />}
