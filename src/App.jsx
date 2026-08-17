@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, removePoint, reorderPoint, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { buildChatGptPrompt, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, removePoint, reorderPoint, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 
 const sensors = [
   PointerSensor.configure({
@@ -89,12 +89,53 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
   </article>;
 }
 
-function Segment({ before, after, candidates, onAdd, onEdit, onMove, onPromote, onDelete }) {
+function Segment({ before, after, candidates, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
+    <button className="ask-chatgpt" onClick={onAsk}>✨ ChatGPTに相談</button>
   </section>;
+}
+
+function ChatGptSheet({ plan, segmentIndex, onClose }) {
+  const [extraRequest, setExtraRequest] = useState('');
+  const [prompt, setPrompt] = useState(() => buildChatGptPrompt(plan, segmentIndex));
+  const [copyState, setCopyState] = useState('idle');
+  const feedbackTimer = useRef(null);
+  const before = plan.points[segmentIndex];
+  const after = plan.points[segmentIndex + 1];
+
+  useEffect(() => () => clearTimeout(feedbackTimer.current), []);
+  const updateRequest = (event) => {
+    const value = event.target.value;
+    setExtraRequest(value);
+    setPrompt(buildChatGptPrompt(plan, segmentIndex, value));
+    setCopyState('idle');
+  };
+  const copyPrompt = async () => {
+    clearTimeout(feedbackTimer.current);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable');
+      await navigator.clipboard.writeText(prompt);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+    feedbackTimer.current = setTimeout(() => setCopyState('idle'), 2500);
+  };
+
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="sheet chatgpt-sheet" role="dialog" aria-modal="true" aria-labelledby="chatgpt-sheet-title">
+      <div className="sheet-grip" />
+      <div className="sheet-head"><div><span className="eyebrow">ASK CHATGPT</span><h2 id="chatgpt-sheet-title">この区間の候補をChatGPTに相談</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <p className="route-context">{before.name} → {after.name}</p>
+      <label>追加の希望 <span>（任意）</span><input maxLength="120" value={extraRequest} onChange={updateRequest} placeholder="例：景色がいい場所が気になる" /></label>
+      <label>生成するプロンプト<textarea className="prompt-textarea" value={prompt} onChange={(event) => { setPrompt(event.target.value); setCopyState('idle'); }} /></label>
+      <button type="button" className="primary submit" onClick={copyPrompt}>{copyState === 'copied' ? 'コピーしました' : 'プロンプトをコピー'}</button>
+      {copyState === 'failed' && <p className="copy-error" role="status">コピーできませんでした。本文を選択して手動でコピーしてください。</p>}
+    </section>
+  </div>;
 }
 
 function MoveCandidateSheet({ candidate, currentRoute, destinations, onClose, onMove }) {
@@ -156,7 +197,7 @@ function formatPlanDate(date) {
 }
 
 export default function App() {
-  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
+  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [chatGptSegment, setChatGptSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
@@ -181,7 +222,7 @@ export default function App() {
     const before = plan.points[index];
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setChatGptSegment(index)} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
@@ -237,5 +278,6 @@ export default function App() {
       }} />;
     })()}
     {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
+    {chatGptSegment !== null && <ChatGptSheet plan={plan} segmentIndex={chatGptSegment} onClose={() => setChatGptSegment(null)} />}
   </>;
 }
