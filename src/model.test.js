@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialPlan, insertCandidate, removePoint, reorderPoint, segmentKey } from './model';
+import { initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, removePoint, reorderPoint, segmentKey } from './model';
 
 describe('plan model', () => {
   it('inserts a candidate and creates two segments', () => {
@@ -19,14 +19,52 @@ describe('plan model', () => {
     expect(plan.candidates['tokyo-start::kawaguchiko'][0].name).toBe('休憩所');
   });
 
-  it('protects locked points while reordering normal points', () => {
+  it('keeps start and goal fixed while reordering normal points', () => {
     const plan = initialPlan();
     plan.points.splice(1, 0, { id: 'stop', name: '休憩所', memo: '' }, { id: 'cafe', name: 'カフェ', memo: '' });
     expect(reorderPoint(plan, 0, 1)).toBe(plan);
+    expect(reorderPoint(plan, plan.points.length - 1, 2)).toBe(plan);
     expect(reorderPoint(plan, 1, 3).points.map((point) => point.id)).toEqual([
       'tokyo-start', 'cafe', 'kawaguchiko', 'stop', 'tokyo-goal',
     ]);
     expect(reorderPoint(plan, 1, 2).points[2].name).toBe('休憩所');
+  });
+
+  it('separates point roles from drag and remove permissions', () => {
+    const [start, main, goal] = initialPlan().points;
+    expect([start, main, goal].map(isEndpoint)).toEqual([true, false, true]);
+    expect([start, main, goal].map(isDraggable)).toEqual([false, true, false]);
+    expect([start, main, goal].map(isRemovable)).toEqual([false, false, false]);
+    expect(isRemovable({ id: 'stop', name: '地点A' })).toBe(true);
+  });
+
+  it('moves MAIN freely between normal points but never beyond endpoints', () => {
+    const plan = initialPlan();
+    plan.points.splice(1, 0, { id: 'a', name: '地点A', memo: '' });
+    plan.points.splice(3, 0, { id: 'b', name: '地点B', memo: '' });
+
+    const beforeA = reorderPoint(plan, 2, 1);
+    expect(beforeA.points.map((point) => point.id)).toEqual([
+      'tokyo-start', 'kawaguchiko', 'a', 'b', 'tokyo-goal',
+    ]);
+    const afterB = reorderPoint(beforeA, 1, 3);
+    expect(afterB.points.map((point) => point.id)).toEqual([
+      'tokyo-start', 'a', 'b', 'kawaguchiko', 'tokyo-goal',
+    ]);
+    expect(reorderPoint(afterB, 3, 0)).toBe(afterB);
+    expect(reorderPoint(afterB, 3, 4)).toBe(afterB);
+  });
+
+  it('rejects moving a normal point outside the route endpoints', () => {
+    const plan = initialPlan();
+    plan.points.splice(1, 0, { id: 'a', name: '地点A', memo: '' });
+    expect(reorderPoint(plan, 1, 0)).toBe(plan);
+    expect(reorderPoint(plan, 1, plan.points.length - 1)).toBe(plan);
+  });
+
+  it('does not remove MAIN', () => {
+    const plan = initialPlan();
+    expect(removePoint(plan, 1)).toBe(plan);
   });
 
   it('moves normal points to either side of MAIN while keeping candidates on their starting point', () => {
@@ -64,5 +102,31 @@ describe('plan model', () => {
     expect(next.points.map((point) => point.id)).toEqual(['tokyo-start', 'cafe', 'stop', 'kawaguchiko', 'tokyo-goal']);
     expect(next.candidates['stop::kawaguchiko']).toEqual(plan.candidates['stop::cafe']);
     expect(next.candidates['stop::cafe']).toBeUndefined();
+  });
+
+  it('keeps every candidate unique when MAIN is reordered', () => {
+    const plan = initialPlan();
+    plan.points.splice(1, 0, { id: 'a', name: '地点A', memo: '' });
+    plan.points.splice(3, 0, { id: 'b', name: '地点B', memo: '' });
+    plan.candidates = {
+      'tokyo-start::a': [{ id: 'c1', name: '候補1', memo: '' }],
+      'a::kawaguchiko': [{ id: 'c2', name: '候補2', memo: '' }],
+      'kawaguchiko::b': [{ id: 'c3', name: '候補3', memo: '' }],
+      'b::tokyo-goal': [{ id: 'c4', name: '候補4', memo: '' }],
+    };
+
+    const next = reorderPoint(plan, 2, 3);
+    expect(next.points.map((point) => point.id)).toEqual([
+      'tokyo-start', 'a', 'b', 'kawaguchiko', 'tokyo-goal',
+    ]);
+    expect(next.candidates).toEqual({
+      'tokyo-start::a': plan.candidates['tokyo-start::a'],
+      'a::b': plan.candidates['a::kawaguchiko'],
+      'b::kawaguchiko': plan.candidates['b::tokyo-goal'],
+      'kawaguchiko::tokyo-goal': plan.candidates['kawaguchiko::b'],
+    });
+    expect(Object.values(next.candidates).flat().map((candidate) => candidate.id).sort()).toEqual([
+      'c1', 'c2', 'c3', 'c4',
+    ]);
   });
 });
