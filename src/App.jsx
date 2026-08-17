@@ -1,7 +1,7 @@
 import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 
 const sensors = [
@@ -58,14 +58,40 @@ function RouteItem({ point, index, pointIndex, total, children, onChange, onRemo
   </div>;
 }
 
+function CandidateCard({ candidate, onEdit, onPromote, onDelete }) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return undefined;
+    const closeMenu = (event) => {
+      if (!menuRef.current?.contains(event.target)) setIsMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    return () => document.removeEventListener('pointerdown', closeMenu);
+  }, [isMenuOpen]);
+
+  return <article className="candidate">
+    <span className="candidate-label">候補</span>
+    <h3>{candidate.name}</h3>
+    {candidate.memo && <p>{candidate.memo}</p>}
+    <div className="candidate-actions">
+      <button type="button" className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button>
+      <button type="button" className="candidate-edit" onClick={() => onEdit(candidate.id)}>編集</button>
+      <div className="candidate-menu" ref={menuRef}>
+        <button type="button" className="candidate-menu-trigger" aria-label="候補のその他の操作" aria-haspopup="menu" aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)}>⋯</button>
+        {isMenuOpen && <div className="candidate-menu-popover" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setIsMenuOpen(false); onDelete(candidate.id); }}>削除</button>
+        </div>}
+      </div>
+    </div>
+  </article>;
+}
+
 function Segment({ before, after, candidates, onAdd, onEdit, onPromote, onDelete }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
-    {candidates.map((candidate) => <article className="candidate" key={candidate.id}>
-      <span className="candidate-label">立ち寄り候補</span><h3>{candidate.name}</h3>
-      {candidate.memo && <p>{candidate.memo}</p>}
-      <div className="candidate-actions"><button className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button><button className="secondary small" onClick={() => onEdit(candidate.id)}>編集</button><button className="danger small" onClick={() => onDelete(candidate.id)}>削除</button></div>
-    </article>)}
+    {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
   </section>;
 }
