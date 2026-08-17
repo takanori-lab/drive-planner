@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, removePoint, reorderPoint, segmentKey } from './model';
+import { createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, removePoint, reorderPoint, segmentKey, updateCandidate } from './model';
 
 describe('plan model', () => {
   it('creates a new plan with unique role-specific points and no candidates', () => {
@@ -30,6 +30,34 @@ describe('plan model', () => {
     expect(next.points.map((p) => p.name)).toEqual(['東京駅', '展望台', '河口湖', '東京駅']);
     expect(segmentKey(next.points[0], next.points[1])).toBe('tokyo-start::view');
     expect(segmentKey(next.points[1], next.points[2])).toBe('view::kawaguchiko');
+  });
+
+  it('updates only the selected candidate while preserving its id and segment', () => {
+    const plan = initialPlan();
+    const key = 'tokyo-start::kawaguchiko';
+    const otherKey = 'kawaguchiko::tokyo-goal';
+    plan.candidates = {
+      [key]: [
+        { id: 'bakery', name: '湖畔のパン屋', memo: '朝寄りたい' },
+        { id: 'cafe', name: 'カフェ', memo: '休憩' },
+      ],
+      [otherKey]: [{ id: 'park', name: '公園', memo: '散歩' }],
+    };
+
+    const next = updateCandidate(plan, key, 'bakery', { name: '湖畔のベーカリー', memo: '9時ごろ寄りたい' });
+
+    expect(next.candidates[key][0]).toEqual({ id: 'bakery', name: '湖畔のベーカリー', memo: '9時ごろ寄りたい' });
+    expect(next.candidates[key][1]).toBe(plan.candidates[key][1]);
+    expect(next.candidates[otherKey]).toBe(plan.candidates[otherKey]);
+    expect(Object.keys(next.candidates)).toEqual(Object.keys(plan.candidates));
+    expect(Object.values(next.candidates).flat()).toHaveLength(3);
+  });
+
+  it('returns the original plan when the candidate does not exist', () => {
+    const plan = initialPlan();
+    plan.candidates['tokyo-start::kawaguchiko'] = [{ id: 'cafe', name: 'カフェ', memo: '' }];
+    expect(updateCandidate(plan, 'tokyo-start::kawaguchiko', 'missing', { name: '別名', memo: '別メモ' })).toBe(plan);
+    expect(updateCandidate(plan, 'missing::segment', 'cafe', { name: '別名', memo: '別メモ' })).toBe(plan);
   });
 
   it('returns a removed point to the merged segment', () => {

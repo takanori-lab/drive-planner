@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useState } from 'react';
-import { createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
+import { createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 
 const sensors = [
   PointerSensor.configure({
@@ -58,27 +58,28 @@ function RouteItem({ point, index, pointIndex, total, children, onChange, onRemo
   </div>;
 }
 
-function Segment({ before, after, candidates, onAdd, onPromote, onDelete }) {
+function Segment({ before, after, candidates, onAdd, onEdit, onPromote, onDelete }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
     {candidates.map((candidate) => <article className="candidate" key={candidate.id}>
       <span className="candidate-label">立ち寄り候補</span><h3>{candidate.name}</h3>
       {candidate.memo && <p>{candidate.memo}</p>}
-      <div className="candidate-actions"><button className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button><button className="danger small" onClick={() => onDelete(candidate.id)}>削除</button></div>
+      <div className="candidate-actions"><button className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button><button className="secondary small" onClick={() => onEdit(candidate.id)}>編集</button><button className="danger small" onClick={() => onDelete(candidate.id)}>削除</button></div>
     </article>)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
   </section>;
 }
 
-function CandidateSheet({ route, onClose, onSubmit }) {
-  const [name, setName] = useState(''); const [memo, setMemo] = useState('');
+function CandidateSheet({ route, initialName = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
+  const [name, setName] = useState(initialName); const [memo, setMemo] = useState(initialMemo);
+  const isEditing = mode === 'edit';
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
     <form className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), memo.trim()); }}>
-      <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">NEW STOP</span><h2 id="sheet-title">立ち寄り候補を追加</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">{isEditing ? 'EDIT STOP' : 'NEW STOP'}</span><h2 id="sheet-title">立ち寄り候補を{isEditing ? '編集' : '追加'}</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
       <p className="route-context">{route}</p>
       <label>場所名<input autoFocus required maxLength="60" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：湖畔のパン屋" /></label>
       <label>メモ <span>（任意）</span><textarea maxLength="200" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="気になること、寄りたい時間など" /></label>
-      <button className="primary submit" disabled={!name.trim()}>候補として保存</button>
+      <button className="primary submit" disabled={!name.trim()}>{isEditing ? '変更を保存' : '候補として保存'}</button>
     </form>
   </div>;
 }
@@ -113,7 +114,7 @@ function formatPlanDate(date) {
 }
 
 export default function App() {
-  const [plan, setPlan] = useState(loadPlan); const [sheetIndex, setSheetIndex] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
+  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
@@ -123,7 +124,7 @@ export default function App() {
   const submitNewPlan = (values) => {
     if (!window.confirm('現在のドライブ内容を新しいドライブに置き換えます。よろしいですか？')) return;
     setPlan(createPlan(values));
-    setSheetIndex(null);
+    setCandidateSheet(null);
     setIsCreating(false);
   };
   const finishReorder = ({ operation }) => {
@@ -138,7 +139,7 @@ export default function App() {
     const before = plan.points[index];
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
@@ -165,7 +166,20 @@ export default function App() {
       <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点またはMAIN地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
       <button className="reset" onClick={reset}>サンプルプランに戻す</button>
     </main><footer>Drive Planner Prototype 01</footer>
-    {sheetIndex !== null && <CandidateSheet route={`${plan.points[sheetIndex].name} → ${plan.points[sheetIndex + 1].name}`} onClose={() => setSheetIndex(null)} onSubmit={(name, memo) => { const key = segmentKey(plan.points[sheetIndex], plan.points[sheetIndex + 1]); setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } })); setSheetIndex(null); }} />}
+    {candidateSheet && (() => {
+      const { index, mode, candidateId } = candidateSheet;
+      const key = segmentKey(plan.points[index], plan.points[index + 1]);
+      const candidate = mode === 'edit' ? (plan.candidates[key] || []).find((item) => item.id === candidateId) : null;
+      if (mode === 'edit' && !candidate) return null;
+      return <CandidateSheet route={`${plan.points[index].name} → ${plan.points[index + 1].name}`} mode={mode} initialName={candidate?.name} initialMemo={candidate?.memo} onClose={() => setCandidateSheet(null)} onSubmit={(name, memo) => {
+        if (mode === 'edit') {
+          setPlan((old) => updateCandidate(old, key, candidateId, { name, memo }));
+        } else {
+          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } }));
+        }
+        setCandidateSheet(null);
+      }} />;
+    })()}
     {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
   </>;
 }
