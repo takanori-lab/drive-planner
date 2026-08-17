@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatGptPrompt, buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate } from './model';
+import { buildChatGptPrompt, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate } from './model';
 
 describe('plan model', () => {
   it('builds a ChatGPT prompt with all drive context', () => {
@@ -371,18 +371,10 @@ describe('plan model', () => {
     expect(normalized.candidates.segment[0]).toMatchObject({ googleMapsUrl: 'https://goo.gl/maps/xyz', locationNote: '' });
   });
 
-  it('builds encoded search and driving directions URLs without shared URLs', () => {
+  it('builds an encoded Maps search URL from a name and location note', () => {
     const search = new URL(buildGoogleMapsSearchUrl({ name: 'Lake Bake', locationNote: '河口湖の北側' }));
     expect(search.searchParams.get('query')).toBe('Lake Bake 河口湖の北側');
     expect(buildGoogleMapsSearchUrl({ name: '  ', locationNote: '河口湖' })).toBe('');
-    const directions = new URL(buildGoogleMapsDirectionsUrl(
-      { name: '東京駅', locationNote: '丸の内' },
-      { name: '湖畔のパン屋', googleMapsUrl: 'https://maps.app.goo.gl/short', locationNote: 'https://maps.app.goo.gl/short' },
-    ));
-    expect(directions.searchParams.get('origin')).toBe('東京駅 丸の内');
-    expect(directions.searchParams.get('destination')).toBe('湖畔のパン屋');
-    expect(directions.searchParams.get('travelmode')).toBe('driving');
-    expect(directions.href).not.toContain('short');
   });
 
   it('preserves and updates Google Maps URLs through candidate operations', () => {
