@@ -3,9 +3,9 @@ export const STORAGE_KEY = 'drive-planner:v1';
 export const initialPlan = () => ({
   title: '東京発・河口湖ドライブ',
   points: [
-    { id: 'tokyo-start', name: '東京駅', memo: '', locked: 'start' },
-    { id: 'kawaguchiko', name: '河口湖', memo: '', locked: 'main' },
-    { id: 'tokyo-goal', name: '東京駅', memo: '', locked: 'goal' },
+    { id: 'tokyo-start', name: '東京駅', locationNote: '', memo: '', locked: 'start' },
+    { id: 'kawaguchiko', name: '河口湖', locationNote: '', memo: '', locked: 'main' },
+    { id: 'tokyo-goal', name: '東京駅', locationNote: '', memo: '', locked: 'goal' },
   ],
   candidates: {},
 });
@@ -29,9 +29,11 @@ export function buildChatGptPrompt(plan, segmentIndex, extraRequest = '') {
   const candidates = plan.candidates?.[segmentKey(before, after)] || [];
   const request = extraRequest.trim();
   const intro = date ? `${date}に車で「${plan.title}」をします。` : `車で「${plan.title}」をします。`;
-  const pointNotes = [before, after].filter((point) => point.memo?.trim());
-  const pointNoteSection = pointNotes.length ? `\n地点の補足：\n${pointNotes.map((point) => `- ${point.name}：${point.memo.trim()}`).join('\n')}\n` : '';
-  const candidateSection = candidates.length ? `\nすでに候補になっている場所：\n${candidates.map((candidate) => `- ${candidate.name}`).join('\n')}\n` : '';
+  const pointLocations = [before, after].filter((point) => point.locationNote?.trim());
+  const pointMemos = [before, after].filter((point) => point.memo?.trim());
+  const locationSection = pointLocations.length ? `\n地点の場所情報：\n${pointLocations.map((point) => `- ${point.name}：${point.locationNote.trim()}`).join('\n')}\n` : '';
+  const memoSection = pointMemos.length ? `\n地点メモ：\n${pointMemos.map((point) => `- ${point.name}：${point.memo.trim()}`).join('\n')}\n` : '';
+  const candidateSection = candidates.length ? `\nすでに候補になっている場所：\n${candidates.map((candidate) => `- ${candidate.name}${candidate.locationNote?.trim() ? `（${candidate.locationNote.trim()}）` : ''}`).join('\n')}\n` : '';
   const requestSection = request ? `\n追加の希望：\n${request}\n` : '';
 
   return `${intro}
@@ -43,7 +45,9 @@ ${route}
 ${main ? `メインの目的地は「${main.name}」です。\n\n` : ''}今回、
 「${before.name} → ${after.name}」
 の間で立ち寄れる場所を探しています。
-${pointNoteSection}${candidateSection}${requestSection}
+${locationSection}${memoSection}${candidateSection}${requestSection}
+地点の場所情報がある場合は、その情報を優先して具体的な場所を特定してください。地点名だけでは具体的な場所を特定できず、場所の補足情報も十分でない場合は、別の場所を勝手に想定せず、必要な追加情報を確認してください。
+
 有名観光地を並べるだけではなく、車だからこそ寄りやすい場所、少し変わった施設や場所、景色のいい道・スポット、地元らしい場所など、「予定していなかったけれど寄ったら面白そう」と思える候補を5件提案してください。
 
 大きくルートを外れる場所は避け、すでに候補になっている場所との重複もできるだけ避けてください。
@@ -77,9 +81,9 @@ export function createPlan({ title, date, startName, mainName, goalName }) {
     title,
     date,
     points: [
-      { id: `${planId}-start`, name: startName, memo: '', locked: 'start' },
-      { id: `${planId}-main`, name: mainName, memo: '', locked: 'main' },
-      { id: `${planId}-goal`, name: goalName, memo: '', locked: 'goal' },
+      { id: `${planId}-start`, name: startName, locationNote: '', memo: '', locked: 'start' },
+      { id: `${planId}-main`, name: mainName, locationNote: '', memo: '', locked: 'main' },
+      { id: `${planId}-goal`, name: goalName, locationNote: '', memo: '', locked: 'goal' },
     ],
     candidates: {},
   };
@@ -97,7 +101,7 @@ export function insertCandidate(plan, segmentIndex, candidateId) {
   const oldKey = segmentKey(before, after);
   const candidate = (plan.candidates[oldKey] || []).find((item) => item.id === candidateId);
   if (!candidate) return plan;
-  const point = { id: candidate.id, name: candidate.name, memo: candidate.memo || '' };
+  const point = { id: candidate.id, name: candidate.name, locationNote: candidate.locationNote ?? '', memo: candidate.memo || '' };
   const points = [...plan.points.slice(0, segmentIndex + 1), point, ...plan.points.slice(segmentIndex + 1)];
   const rest = (plan.candidates[oldKey] || []).filter((item) => item.id !== candidateId);
   const candidates = { ...plan.candidates };
@@ -115,7 +119,7 @@ export function updateCandidate(plan, key, candidateId, updates) {
     candidates: {
       ...plan.candidates,
       [key]: segmentCandidates.map((candidate) => candidate.id === candidateId
-        ? { ...candidate, name: updates.name, memo: updates.memo, id: candidate.id }
+        ? { ...candidate, name: updates.name, locationNote: updates.locationNote ?? candidate.locationNote ?? '', memo: updates.memo, id: candidate.id }
         : candidate),
     },
   };
@@ -144,7 +148,7 @@ export function removePoint(plan, pointIndex) {
   const rightKey = segmentKey(point, after);
   const merged = [
     ...(plan.candidates[leftKey] || []),
-    { id: makeId(), name: point.name, memo: point.memo },
+    { id: makeId(), name: point.name, locationNote: point.locationNote ?? '', memo: point.memo ?? '' },
     ...(plan.candidates[rightKey] || []),
   ];
   const candidates = { ...plan.candidates };
