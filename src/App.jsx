@@ -30,16 +30,20 @@ function loadPlan() {
 }
 
 function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragging }) {
-  const [editing, setEditing] = useState(false);
+  const [editingField, setEditingField] = useState(null);
 
   return <article className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
     <div className="point-icon" aria-hidden="true">{point.locked === 'main' ? '★' : index === 0 ? '●' : index === total - 1 ? '⌂' : '•'}</div>
     <div className="point-copy">
       <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
-      {editing ? <div className="memo-editor">
-        <textarea autoFocus value={point.memo} placeholder="この地点のメモ" onChange={(e) => onChange({ ...point, memo: e.target.value })} />
-        <button className="text-button" onClick={() => setEditing(false)}>完了</button>
-      </div> : <button className="memo-button" onClick={() => setEditing(true)}>{point.memo || '＋ メモを追加'}</button>}
+      {editingField === 'location' ? <div className="point-field-editor">
+        <textarea autoFocus maxLength="300" value={point.locationNote ?? ''} placeholder="河口湖の北側 / 富士河口湖町○○ / Google Maps URL" onChange={(e) => onChange({ ...point, locationNote: e.target.value })} />
+        <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
+      </div> : <button type="button" className={`point-field-button location-note ${point.locationNote ? 'has-value' : ''}`} onClick={() => setEditingField('location')}>{point.locationNote ? <><span>場所</span>{point.locationNote}</> : '＋ 場所の補足'}</button>}
+      {editingField === 'memo' ? <div className="point-field-editor">
+        <textarea autoFocus value={point.memo ?? ''} placeholder="この地点のメモ" onChange={(e) => onChange({ ...point, memo: e.target.value })} />
+        <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
+      </div> : <button type="button" className="point-field-button" onClick={() => setEditingField('memo')}>{point.memo || '＋ メモを追加'}</button>}
       {isRemovable(point) && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
     </div>
     <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!isDraggable(point)}>⠿</button>
@@ -74,7 +78,8 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
   return <article className="candidate">
     <span className="candidate-label">候補</span>
     <h3>{candidate.name}</h3>
-    {candidate.memo && <p>{candidate.memo}</p>}
+    {candidate.locationNote && <p className="candidate-location"><span>場所</span>{candidate.locationNote}</p>}
+    {candidate.memo && <p className="candidate-memo">{candidate.memo}</p>}
     <div className="candidate-actions">
       <button type="button" className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button>
       <button type="button" className="candidate-edit" onClick={() => onEdit(candidate.id)}>編集</button>
@@ -154,14 +159,15 @@ function MoveCandidateSheet({ candidate, currentRoute, destinations, onClose, on
   </div>;
 }
 
-function CandidateSheet({ route, initialName = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
-  const [name, setName] = useState(initialName); const [memo, setMemo] = useState(initialMemo);
+function CandidateSheet({ route, initialName = '', initialLocationNote = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
+  const [name, setName] = useState(initialName); const [locationNote, setLocationNote] = useState(initialLocationNote); const [memo, setMemo] = useState(initialMemo);
   const isEditing = mode === 'edit';
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-    <form className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), memo.trim()); }}>
+    <form className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), locationNote.trim(), memo.trim()); }}>
       <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">{isEditing ? 'EDIT STOP' : 'NEW STOP'}</span><h2 id="sheet-title">立ち寄り候補を{isEditing ? '編集' : '追加'}</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
       <p className="route-context">{route}</p>
       <label>場所名<input autoFocus required maxLength="60" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：湖畔のパン屋" /></label>
+      <label>場所の補足 <span>（任意）</span><textarea maxLength="300" value={locationNote} onChange={(e) => setLocationNote(e.target.value)} placeholder="河口湖の北側 / 富士河口湖町○○ / Google Maps URL" /></label>
       <label>メモ <span>（任意）</span><textarea maxLength="200" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="気になること、寄りたい時間など" /></label>
       <button className="primary submit" disabled={!name.trim()}>{isEditing ? '変更を保存' : '候補として保存'}</button>
     </form>
@@ -255,11 +261,11 @@ export default function App() {
       const key = segmentKey(plan.points[index], plan.points[index + 1]);
       const candidate = mode === 'edit' ? (plan.candidates[key] || []).find((item) => item.id === candidateId) : null;
       if (mode === 'edit' && !candidate) return null;
-      return <CandidateSheet route={`${plan.points[index].name} → ${plan.points[index + 1].name}`} mode={mode} initialName={candidate?.name} initialMemo={candidate?.memo} onClose={() => setCandidateSheet(null)} onSubmit={(name, memo) => {
+      return <CandidateSheet route={`${plan.points[index].name} → ${plan.points[index + 1].name}`} mode={mode} initialName={candidate?.name} initialLocationNote={candidate?.locationNote ?? ''} initialMemo={candidate?.memo} onClose={() => setCandidateSheet(null)} onSubmit={(name, locationNote, memo) => {
         if (mode === 'edit') {
-          setPlan((old) => updateCandidate(old, key, candidateId, { name, memo }));
+          setPlan((old) => updateCandidate(old, key, candidateId, { name, locationNote, memo }));
         } else {
-          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } }));
+          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, locationNote, memo }] } }));
         }
         setCandidateSheet(null);
       }} />;
