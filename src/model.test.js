@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, removePoint, reorderPoint, segmentKey, updateCandidate } from './model';
+import { createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, moveCandidate, removePoint, reorderPoint, segmentKey, updateCandidate } from './model';
 
 describe('plan model', () => {
   it('creates a new plan with unique role-specific points and no candidates', () => {
@@ -58,6 +58,46 @@ describe('plan model', () => {
     plan.candidates['tokyo-start::kawaguchiko'] = [{ id: 'cafe', name: 'カフェ', memo: '' }];
     expect(updateCandidate(plan, 'tokyo-start::kawaguchiko', 'missing', { name: '別名', memo: '別メモ' })).toBe(plan);
     expect(updateCandidate(plan, 'missing::segment', 'cafe', { name: '別名', memo: '別メモ' })).toBe(plan);
+  });
+
+  it('moves one unchanged candidate to the end of another segment', () => {
+    const plan = initialPlan();
+    const fromKey = 'tokyo-start::kawaguchiko';
+    const toKey = 'kawaguchiko::tokyo-goal';
+    const otherKey = 'unrelated::segment';
+    const moving = { id: 'bakery', name: '湖畔のパン屋', memo: '朝寄りたい' };
+    const sourceOther = { id: 'cafe', name: 'カフェ', memo: '休憩' };
+    const destinationOther = { id: 'park', name: '公園', memo: '散歩' };
+    const unrelated = [{ id: 'shop', name: '売店', memo: '' }];
+    plan.candidates = { [fromKey]: [moving, sourceOther], [toKey]: [destinationOther], [otherKey]: unrelated };
+    const countBefore = Object.values(plan.candidates).flat().length;
+
+    const next = moveCandidate(plan, fromKey, toKey, moving.id);
+
+    expect(next.candidates[fromKey]).toEqual([sourceOther]);
+    expect(next.candidates[toKey]).toEqual([destinationOther, moving]);
+    expect(next.candidates[toKey][1]).toBe(moving);
+    expect(next.candidates[toKey][1]).toEqual({ id: 'bakery', name: '湖畔のパン屋', memo: '朝寄りたい' });
+    expect(next.candidates[otherKey]).toBe(unrelated);
+    expect(Object.values(next.candidates).flat()).toHaveLength(countBefore);
+  });
+
+  it('removes an empty source segment after moving its last candidate', () => {
+    const plan = initialPlan();
+    const fromKey = 'tokyo-start::kawaguchiko';
+    const toKey = 'kawaguchiko::tokyo-goal';
+    plan.candidates[fromKey] = [{ id: 'bakery', name: '湖畔のパン屋', memo: '' }];
+    const next = moveCandidate(plan, fromKey, toKey, 'bakery');
+    expect(next.candidates[fromKey]).toBeUndefined();
+    expect(next.candidates[toKey]).toEqual([{ id: 'bakery', name: '湖畔のパン屋', memo: '' }]);
+  });
+
+  it('returns the original plan for a missing candidate or the same segment', () => {
+    const plan = initialPlan();
+    const fromKey = 'tokyo-start::kawaguchiko';
+    plan.candidates[fromKey] = [{ id: 'bakery', name: '湖畔のパン屋', memo: '' }];
+    expect(moveCandidate(plan, fromKey, 'kawaguchiko::tokyo-goal', 'missing')).toBe(plan);
+    expect(moveCandidate(plan, fromKey, fromKey, 'bakery')).toBe(plan);
   });
 
   it('returns a removed point to the merged segment', () => {

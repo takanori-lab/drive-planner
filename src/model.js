@@ -63,6 +63,20 @@ export function updateCandidate(plan, key, candidateId, updates) {
   };
 }
 
+export function moveCandidate(plan, fromKey, toKey, candidateId) {
+  if (fromKey === toKey) return plan;
+  const sourceCandidates = plan.candidates[fromKey];
+  const candidate = sourceCandidates?.find((item) => item.id === candidateId);
+  if (!candidate) return plan;
+
+  const remainingCandidates = sourceCandidates.filter((item) => item.id !== candidateId);
+  const candidates = { ...plan.candidates };
+  if (remainingCandidates.length) candidates[fromKey] = remainingCandidates;
+  else delete candidates[fromKey];
+  candidates[toKey] = [...(plan.candidates[toKey] || []), candidate];
+  return { ...plan, candidates };
+}
+
 export function removePoint(plan, pointIndex) {
   const point = plan.points[pointIndex];
   if (!isRemovable(point)) return plan;
