@@ -1,7 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, moveCandidate, removePoint, reorderPoint, segmentKey, updateCandidate } from './model';
+import { buildChatGptPrompt, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, moveCandidate, removePoint, reorderPoint, segmentKey, updateCandidate } from './model';
 
 describe('plan model', () => {
+  it('builds a ChatGPT prompt with all drive context', () => {
+    const plan = initialPlan();
+    plan.title = '富士山周辺ドライブ';
+    plan.date = '2026-08-29';
+    plan.points.splice(1, 0, { id: 'bakery', name: '湖畔のパン屋', memo: '' });
+    plan.candidates[segmentKey(plan.points[1], plan.points[2])] = [
+      { id: 'cake', name: '湖畔のケーキ屋', memo: '' },
+      { id: 'view', name: '展望台', memo: '' },
+    ];
+    const prompt = buildChatGptPrompt(plan, 1, '景色がいい場所が気になる');
+    expect(prompt).toContain('2026年8月29日');
+    expect(prompt).toContain('「富士山周辺ドライブ」');
+    expect(prompt).toContain('東京駅 → 湖畔のパン屋 → 河口湖 → 東京駅');
+    expect(prompt).toContain('「湖畔のパン屋 → 河口湖」');
+    expect(prompt).toContain('メインの目的地は「河口湖」');
+    expect(prompt).toContain('- 湖畔のケーキ屋\n- 展望台');
+    expect(prompt).toContain('追加の希望：\n景色がいい場所が気になる');
+    expect(prompt).toContain('5件程度');
+    expect(prompt).toContain('相性が特に良い2件');
+  });
+
+  it('builds a prompt without optional date, candidates, or request', () => {
+    const prompt = buildChatGptPrompt(initialPlan(), 0, '   ');
+    expect(prompt).toContain('車で「東京発・河口湖ドライブ」をします。');
+    expect(prompt).toContain('東京駅 → 河口湖 → 東京駅');
+    expect(prompt).toContain('「東京駅 → 河口湖」');
+    expect(prompt).toContain('メインの目的地は「河口湖」');
+    expect(prompt).not.toContain('年');
+    expect(prompt).not.toContain('すでに候補になっている場所：');
+    expect(prompt).not.toContain('追加の希望：');
+  });
+
   it('creates a new plan with unique role-specific points and no candidates', () => {
     const plan = createPlan({
       title: '富士山周辺ドライブ',
