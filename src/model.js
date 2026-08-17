@@ -48,6 +48,21 @@ export function insertCandidate(plan, segmentIndex, candidateId) {
   return { ...plan, points, candidates };
 }
 
+export function updateCandidate(plan, key, candidateId, updates) {
+  const segmentCandidates = plan.candidates[key];
+  if (!segmentCandidates?.some((candidate) => candidate.id === candidateId)) return plan;
+
+  return {
+    ...plan,
+    candidates: {
+      ...plan.candidates,
+      [key]: segmentCandidates.map((candidate) => candidate.id === candidateId
+        ? { ...candidate, name: updates.name, memo: updates.memo, id: candidate.id }
+        : candidate),
+    },
+  };
+}
+
 export function removePoint(plan, pointIndex) {
   const point = plan.points[pointIndex];
   if (!isRemovable(point)) return plan;
