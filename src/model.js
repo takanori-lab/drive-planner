@@ -13,6 +13,12 @@ export const initialPlan = () => ({
 export const segmentKey = (a, b) => `${a.id}::${b.id}`;
 export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+// `locked` identifies a point's role. Only route endpoints are position-locked;
+// MAIN remains a protected point, but may be reordered between the endpoints.
+export const isEndpoint = (point) => point?.locked === 'start' || point?.locked === 'goal';
+export const isDraggable = (point) => Boolean(point) && !isEndpoint(point);
+export const isRemovable = (point) => Boolean(point) && !point.locked;
+
 export function insertCandidate(plan, segmentIndex, candidateId) {
   const before = plan.points[segmentIndex];
   const after = plan.points[segmentIndex + 1];
@@ -30,7 +36,7 @@ export function insertCandidate(plan, segmentIndex, candidateId) {
 
 export function removePoint(plan, pointIndex) {
   const point = plan.points[pointIndex];
-  if (!point || point.locked) return plan;
+  if (!isRemovable(point)) return plan;
   const before = plan.points[pointIndex - 1];
   const after = plan.points[pointIndex + 1];
   const leftKey = segmentKey(before, point);
@@ -49,7 +55,7 @@ export function removePoint(plan, pointIndex) {
 
 export function reorderPoint(plan, from, to) {
   const point = plan.points[from];
-  if (!point || point.locked || to <= 0 || to >= plan.points.length - 1 || from === to) return plan;
+  if (!isDraggable(point) || to <= 0 || to >= plan.points.length - 1 || from === to) return plan;
   const points = [...plan.points];
   points.splice(from, 1);
   points.splice(to, 0, point);
