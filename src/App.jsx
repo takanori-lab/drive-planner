@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { buildChatGptPrompt, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, removePoint, reorderPoint, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { buildChatGptPrompt, buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 
 const sensors = [
   PointerSensor.configure({
@@ -25,25 +25,35 @@ const sensors = [
 function loadPlan() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved?.points?.length >= 3 ? saved : initialPlan();
+    return saved?.points?.length >= 3 ? normalizePlanMapsUrls(saved) : initialPlan();
   } catch { return initialPlan(); }
 }
 
 function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragging }) {
   const [editingField, setEditingField] = useState(null);
+  const savedMapsUrl = safeGoogleMapsUrl(point.googleMapsUrl);
+  const searchUrl = buildGoogleMapsSearchUrl(point);
 
   return <article className={`point-card ${point.locked === 'main' ? 'main-point' : ''} ${isDragging ? 'is-dragging' : ''}`}>
     <div className="point-icon" aria-hidden="true">{point.locked === 'main' ? '★' : index === 0 ? '●' : index === total - 1 ? '⌂' : '•'}</div>
     <div className="point-copy">
       <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
       {editingField === 'location' ? <div className="point-field-editor">
-        <textarea autoFocus maxLength="300" value={point.locationNote ?? ''} placeholder="河口湖の北側 / 富士河口湖町○○ / Google Maps URL" onChange={(e) => onChange({ ...point, locationNote: e.target.value })} />
+        <textarea autoFocus maxLength="300" value={point.locationNote ?? ''} placeholder="河口湖の北側 / 富士河口湖町○○" onChange={(e) => onChange({ ...point, locationNote: e.target.value })} />
         <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
       </div> : <button type="button" className={`point-field-button location-note ${point.locationNote ? 'has-value' : ''}`} onClick={() => setEditingField('location')}>{point.locationNote ? <><span>場所</span>{point.locationNote}</> : '＋ 場所の補足'}</button>}
       {editingField === 'memo' ? <div className="point-field-editor">
         <textarea autoFocus value={point.memo ?? ''} placeholder="この地点のメモ" onChange={(e) => onChange({ ...point, memo: e.target.value })} />
         <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
       </div> : <button type="button" className="point-field-button" onClick={() => setEditingField('memo')}>{point.memo || '＋ メモを追加'}</button>}
+      <div className="maps-actions">
+        <a href={savedMapsUrl || searchUrl} target="_blank" rel="noopener noreferrer">↗ Googleマップで{savedMapsUrl ? '開く' : '探す'}</a>
+        <button type="button" onClick={() => setEditingField('maps')}>{savedMapsUrl ? 'GoogleマップURLを編集' : '＋ GoogleマップURLを登録'}</button>
+      </div>
+      {editingField === 'maps' && <div className="point-field-editor maps-editor">
+        <label>GoogleマップURL<input autoFocus type="url" value={point.googleMapsUrl ?? ''} placeholder="https://maps.app.goo.gl/..." onChange={(e) => onChange({ ...point, googleMapsUrl: e.target.value })} /></label>
+        <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
+      </div>}
       {isRemovable(point) && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
     </div>
     <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!isDraggable(point)}>⠿</button>
@@ -80,6 +90,7 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
     <h3>{candidate.name}</h3>
     {candidate.locationNote && <p className="candidate-location"><span>場所</span>{candidate.locationNote}</p>}
     {candidate.memo && <p className="candidate-memo">{candidate.memo}</p>}
+    {safeGoogleMapsUrl(candidate.googleMapsUrl) && <a className="candidate-maps-link" href={safeGoogleMapsUrl(candidate.googleMapsUrl)} target="_blank" rel="noopener noreferrer">↗ Googleマップで開く</a>}
     <div className="candidate-actions">
       <button type="button" className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button>
       <button type="button" className="candidate-edit" onClick={() => onEdit(candidate.id)}>編集</button>
@@ -100,6 +111,7 @@ function Segment({ before, after, candidates, onAdd, onAsk, onEdit, onMove, onPr
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
     <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>
+    <a className="segment-maps-link" href={buildGoogleMapsDirectionsUrl(before, after)} target="_blank" rel="noopener noreferrer">↗ Googleマップで経路を見る</a>
   </section>;
 }
 
@@ -159,15 +171,17 @@ function MoveCandidateSheet({ candidate, currentRoute, destinations, onClose, on
   </div>;
 }
 
-function CandidateSheet({ route, initialName = '', initialLocationNote = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
-  const [name, setName] = useState(initialName); const [locationNote, setLocationNote] = useState(initialLocationNote); const [memo, setMemo] = useState(initialMemo);
+function CandidateSheet({ route, initialName = '', initialGoogleMapsUrl = '', initialLocationNote = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
+  const [name, setName] = useState(initialName); const [googleMapsUrl, setGoogleMapsUrl] = useState(initialGoogleMapsUrl); const [locationNote, setLocationNote] = useState(initialLocationNote); const [memo, setMemo] = useState(initialMemo);
   const isEditing = mode === 'edit';
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-    <form className="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), locationNote.trim(), memo.trim()); }}>
+    <form className="sheet candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), googleMapsUrl.trim(), locationNote.trim(), memo.trim()); }}>
       <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">{isEditing ? 'EDIT STOP' : 'NEW STOP'}</span><h2 id="sheet-title">立ち寄り候補を{isEditing ? '編集' : '追加'}</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
       <p className="route-context">{route}</p>
       <label>場所名<input autoFocus required maxLength="60" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：湖畔のパン屋" /></label>
-      <label>場所の補足 <span>（任意）</span><textarea maxLength="300" value={locationNote} onChange={(e) => setLocationNote(e.target.value)} placeholder="河口湖の北側 / 富士河口湖町○○ / Google Maps URL" /></label>
+      <a className={`maps-search-link ${name.trim() ? '' : 'disabled'}`} href={buildGoogleMapsSearchUrl({ name, locationNote }) || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!name.trim()} onClick={(event) => !name.trim() && event.preventDefault()}>↗ Googleマップで探す</a>
+      <label>GoogleマップURL <span>（任意）</span><input type="url" value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)} placeholder="https://maps.app.goo.gl/..." /></label>
+      <label>場所の補足 <span>（任意）</span><textarea maxLength="300" value={locationNote} onChange={(e) => setLocationNote(e.target.value)} placeholder="河口湖の北側 / 富士河口湖町○○" /></label>
       <label>メモ <span>（任意）</span><textarea maxLength="200" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="気になること、寄りたい時間など" /></label>
       <button className="primary submit" disabled={!name.trim()}>{isEditing ? '変更を保存' : '候補として保存'}</button>
     </form>
@@ -261,11 +275,11 @@ export default function App() {
       const key = segmentKey(plan.points[index], plan.points[index + 1]);
       const candidate = mode === 'edit' ? (plan.candidates[key] || []).find((item) => item.id === candidateId) : null;
       if (mode === 'edit' && !candidate) return null;
-      return <CandidateSheet route={`${plan.points[index].name} → ${plan.points[index + 1].name}`} mode={mode} initialName={candidate?.name} initialLocationNote={candidate?.locationNote ?? ''} initialMemo={candidate?.memo} onClose={() => setCandidateSheet(null)} onSubmit={(name, locationNote, memo) => {
+      return <CandidateSheet route={`${plan.points[index].name} → ${plan.points[index + 1].name}`} mode={mode} initialName={candidate?.name} initialGoogleMapsUrl={candidate?.googleMapsUrl ?? ''} initialLocationNote={candidate?.locationNote ?? ''} initialMemo={candidate?.memo} onClose={() => setCandidateSheet(null)} onSubmit={(name, googleMapsUrl, locationNote, memo) => {
         if (mode === 'edit') {
-          setPlan((old) => updateCandidate(old, key, candidateId, { name, locationNote, memo }));
+          setPlan((old) => updateCandidate(old, key, candidateId, { name, googleMapsUrl, locationNote, memo }));
         } else {
-          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, locationNote, memo }] } }));
+          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, googleMapsUrl, locationNote, memo }] } }));
         }
         setCandidateSheet(null);
       }} />;
