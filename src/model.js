@@ -13,6 +13,20 @@ export const initialPlan = () => ({
 export const segmentKey = (a, b) => `${a.id}::${b.id}`;
 export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+export function createPlan({ title, date, startName, mainName, goalName }) {
+  const planId = makeId();
+  return {
+    title,
+    date,
+    points: [
+      { id: `${planId}-start`, name: startName, memo: '', locked: 'start' },
+      { id: `${planId}-main`, name: mainName, memo: '', locked: 'main' },
+      { id: `${planId}-goal`, name: goalName, memo: '', locked: 'goal' },
+    ],
+    candidates: {},
+  };
+}
+
 // `locked` identifies a point's role. Only route endpoints are position-locked;
 // MAIN remains a protected point, but may be reordered between the endpoints.
 export const isEndpoint = (point) => point?.locked === 'start' || point?.locked === 'goal';
