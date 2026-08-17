@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useState } from 'react';
-import { initialPlan, insertCandidate, isDraggable, isRemovable, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
+import { createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, removePoint, reorderPoint, segmentKey, STORAGE_KEY } from './model';
 
 const sensors = [
   PointerSensor.configure({
@@ -83,14 +83,49 @@ function CandidateSheet({ route, onClose, onSubmit }) {
   </div>;
 }
 
+function CreatePlanSheet({ onClose, onSubmit }) {
+  const [values, setValues] = useState({ title: '', date: '', startName: '', mainName: '', goalName: '' });
+  const update = (key) => (event) => setValues((old) => ({ ...old, [key]: event.target.value }));
+  const isComplete = Object.values(values).every((value) => value.trim());
+
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="sheet create-plan-sheet" role="dialog" aria-modal="true" aria-labelledby="create-plan-title" onSubmit={(event) => {
+      event.preventDefault();
+      if (isComplete) onSubmit(Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value.trim()])));
+    }}>
+      <div className="sheet-grip" />
+      <div className="sheet-head"><div><span className="eyebrow">NEW DRIVE</span><h2 id="create-plan-title">新しいドライブを作成</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <p className="replace-notice">現在のドライブ内容は、作成したドライブに置き換わります。</p>
+      <label>ドライブ名<input autoFocus required maxLength="60" value={values.title} onChange={update('title')} placeholder="例：富士山周辺ドライブ" /></label>
+      <label>日付<input required type="date" value={values.date} onChange={update('date')} /></label>
+      <label>出発地点<input required maxLength="60" value={values.startName} onChange={update('startName')} placeholder="例：東京駅" /></label>
+      <label>MAIN地点<input required maxLength="60" value={values.mainName} onChange={update('mainName')} placeholder="例：富士山" /></label>
+      <label>到着地点<input required maxLength="60" value={values.goalName} onChange={update('goalName')} placeholder="例：東京駅" /></label>
+      <button className="primary submit" disabled={!isComplete}>作成する</button>
+    </form>
+  </div>;
+}
+
+function formatPlanDate(date) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+  if (!match) return null;
+  return `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日`;
+}
+
 export default function App() {
-  const [plan, setPlan] = useState(loadPlan); const [sheetIndex, setSheetIndex] = useState(null); const [saved, setSaved] = useState(true);
+  const [plan, setPlan] = useState(loadPlan); const [sheetIndex, setSheetIndex] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
   useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
   const updatePoint = (index, point) => setPlan((old) => ({ ...old, points: old.points.map((p, i) => i === index ? point : p) }));
-  const reset = () => { if (window.confirm('候補やメモをすべて消して、初期状態に戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
+  const reset = () => { if (window.confirm('現在のドライブ内容を削除して、サンプルプランに戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
+  const submitNewPlan = (values) => {
+    if (!window.confirm('現在のドライブ内容を新しいドライブに置き換えます。よろしいですか？')) return;
+    setPlan(createPlan(values));
+    setSheetIndex(null);
+    setIsCreating(false);
+  };
   const finishReorder = ({ operation }) => {
     const { source } = operation;
     if (source && source.initialIndex !== source.index) {
@@ -107,7 +142,7 @@ export default function App() {
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
-    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1><p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
+    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
           <div className="route-item route-endpoint">
@@ -128,8 +163,9 @@ export default function App() {
         </section>
       </DragDropProvider>
       <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点またはMAIN地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
-      <button className="reset" onClick={reset}>初期状態に戻す</button>
+      <button className="reset" onClick={reset}>サンプルプランに戻す</button>
     </main><footer>Drive Planner Prototype 01</footer>
     {sheetIndex !== null && <CandidateSheet route={`${plan.points[sheetIndex].name} → ${plan.points[sheetIndex + 1].name}`} onClose={() => setSheetIndex(null)} onSubmit={(name, memo) => { const key = segmentKey(plan.points[sheetIndex], plan.points[sheetIndex + 1]); setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, memo }] } })); setSheetIndex(null); }} />}
+    {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
   </>;
 }
