@@ -46,15 +46,14 @@ function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragg
   </article>;
 }
 
-function RouteItem({ point, index, total, children, onChange, onRemove }) {
+function RouteItem({ point, index, pointIndex, total, children, onChange, onRemove }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: point.id,
     index,
-    disabled: !isDraggable(point) ? { draggable: true } : false,
   });
 
   return <div ref={ref} className={`route-item ${isDragging ? 'is-dragging' : ''}`}>
-    <PointCard point={point} index={index} total={total} onChange={onChange} onRemove={onRemove} handleRef={handleRef} isDragging={isDragging} />
+    <PointCard point={point} index={pointIndex} total={total} onChange={onChange} onRemove={onRemove} handleRef={handleRef} isDragging={isDragging} />
     {children}
   </div>;
 }
@@ -86,21 +85,46 @@ function CandidateSheet({ route, onClose, onSubmit }) {
 
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [sheetIndex, setSheetIndex] = useState(null); const [saved, setSaved] = useState(true);
+  const start = plan.points[0];
+  const goal = plan.points[plan.points.length - 1];
+  const middlePoints = plan.points.slice(1, -1);
   useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
   const updatePoint = (index, point) => setPlan((old) => ({ ...old, points: old.points.map((p, i) => i === index ? point : p) }));
   const reset = () => { if (window.confirm('候補やメモをすべて消して、初期状態に戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
   const finishReorder = ({ operation }) => {
     const { source } = operation;
-    if (source && source.initialIndex !== source.index) setPlan((old) => reorderPoint(old, source.initialIndex, source.index));
+    if (source && source.initialIndex !== source.index) {
+      // Sortable indexes are relative to middlePoints. The model works with
+      // indexes in the complete points array, whose first item is the start.
+      setPlan((old) => reorderPoint(old, source.initialIndex + 1, source.index + 1));
+    }
+  };
+  const renderSegment = (index) => {
+    const before = plan.points[index];
+    const after = plan.points[index + 1];
+    const key = segmentKey(before, after);
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
     <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1><p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
-          {plan.points.map((point, index) => <RouteItem key={point.id} point={point} index={index} total={plan.points.length} onChange={(p) => updatePoint(index, p)} onRemove={() => setPlan((old) => removePoint(old, index))}>
-            {index < plan.points.length - 1 && (() => { const key = segmentKey(point, plan.points[index + 1]); return <Segment before={point} after={plan.points[index + 1]} candidates={plan.candidates[key] || []} onAdd={() => setSheetIndex(index)} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />; })()}
-          </RouteItem>)}
+          <div className="route-item route-endpoint">
+            <PointCard point={start} index={0} total={plan.points.length} onChange={(point) => updatePoint(0, point)} />
+            {renderSegment(0)}
+          </div>
+          <div className="sortable-region">
+            {middlePoints.map((point, sortableIndex) => {
+              const pointIndex = sortableIndex + 1;
+              return <RouteItem key={point.id} point={point} index={sortableIndex} pointIndex={pointIndex} total={plan.points.length} onChange={(updated) => updatePoint(pointIndex, updated)} onRemove={() => setPlan((old) => removePoint(old, pointIndex))}>
+                {renderSegment(pointIndex)}
+              </RouteItem>;
+            })}
+          </div>
+          <div className="route-item route-endpoint">
+            <PointCard point={goal} index={plan.points.length - 1} total={plan.points.length} onChange={(point) => updatePoint(plan.points.length - 1, point)} />
+          </div>
         </section>
       </DragDropProvider>
       <section className="hint"><span>⠿</span><div><b>順番を変えるには</b><p>通常地点またはMAIN地点の右側のハンドルをドラッグします。タッチ操作では長押ししてから移動してください。</p></div></section>
