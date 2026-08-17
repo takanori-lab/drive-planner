@@ -1,7 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, removePoint, reorderPoint, segmentKey } from './model';
+import { createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isRemovable, removePoint, reorderPoint, segmentKey } from './model';
 
 describe('plan model', () => {
+  it('creates a new plan with unique role-specific points and no candidates', () => {
+    const plan = createPlan({
+      title: '富士山周辺ドライブ',
+      date: '2026-09-20',
+      startName: '東京駅',
+      mainName: '富士山',
+      goalName: '東京駅',
+    });
+
+    expect(plan.title).toBe('富士山周辺ドライブ');
+    expect(plan.date).toBe('2026-09-20');
+    expect(plan.points.map(({ name, locked, memo }) => ({ name, locked, memo }))).toEqual([
+      { name: '東京駅', locked: 'start', memo: '' },
+      { name: '富士山', locked: 'main', memo: '' },
+      { name: '東京駅', locked: 'goal', memo: '' },
+    ]);
+    expect(new Set(plan.points.map((point) => point.id)).size).toBe(3);
+    expect(plan.candidates).toEqual({});
+  });
+
   it('inserts a candidate and creates two segments', () => {
     const plan = initialPlan();
     const key = segmentKey(plan.points[0], plan.points[1]);
