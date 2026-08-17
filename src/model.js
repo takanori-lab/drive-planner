@@ -29,6 +29,8 @@ export function buildChatGptPrompt(plan, segmentIndex, extraRequest = '') {
   const candidates = plan.candidates?.[segmentKey(before, after)] || [];
   const request = extraRequest.trim();
   const intro = date ? `${date}に車で「${plan.title}」をします。` : `車で「${plan.title}」をします。`;
+  const pointNotes = [before, after].filter((point) => point.memo?.trim());
+  const pointNoteSection = pointNotes.length ? `\n地点の補足：\n${pointNotes.map((point) => `- ${point.name}：${point.memo.trim()}`).join('\n')}\n` : '';
   const candidateSection = candidates.length ? `\nすでに候補になっている場所：\n${candidates.map((candidate) => `- ${candidate.name}`).join('\n')}\n` : '';
   const requestSection = request ? `\n追加の希望：\n${request}\n` : '';
 
@@ -41,22 +43,32 @@ ${route}
 ${main ? `メインの目的地は「${main.name}」です。\n\n` : ''}今回、
 「${before.name} → ${after.name}」
 の間で立ち寄れる場所を探しています。
-${candidateSection}${requestSection}
-有名観光地を並べるだけではなく、車だからこそ寄りやすい場所、少し変わった施設や場所、景色のいい道・スポット、地元らしい場所など、「予定していなかったけれど寄ったら面白そう」と思える候補を5件程度提案してください。
+${pointNoteSection}${candidateSection}${requestSection}
+有名観光地を並べるだけではなく、車だからこそ寄りやすい場所、少し変わった施設や場所、景色のいい道・スポット、地元らしい場所など、「予定していなかったけれど寄ったら面白そう」と思える候補を5件提案してください。
 
 大きくルートを外れる場所は避け、すでに候補になっている場所との重複もできるだけ避けてください。
 
-各候補について、
-・場所名
-・どんな場所か
-・この区間で寄る理由
-・おおよその寄り道感
-・営業時間、予約、営業状況など確認した方がよい点
-を簡潔に教えてください。
+5件は比較しやすいよう、それぞれ以下の統一されたMarkdown形式で整理してください。
 
-最後に、このドライブとの相性が特に良い2件を選んでください。
+### 1. 場所名
 
-必要であればWeb検索を使い、現在営業しているかなど最新情報も確認してください。`;
+どんな場所：
+...
+
+この区間で寄る理由：
+...
+
+寄り道感：
+...
+
+確認事項：
+...
+
+2件目以降も同じ形式で、### 2. から ### 5. まで記載してください。
+
+確認事項には、営業時間、予約、定休日、駐車場、季節営業、その他事前に確認した方がよいことを含めてください。
+
+必要であればWeb検索を使い、現在営業しているか、営業時間、定休日、予約、駐車場、季節営業などの最新情報も確認してください。`;
 }
 
 export function createPlan({ title, date, startName, mainName, goalName }) {
