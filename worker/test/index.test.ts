@@ -299,6 +299,15 @@ describe('Drive Planner Worker', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('想定外のinternal errorは従来どおりretryableにする', async () => {
+    const env = environment();
+    env.AI_RATE_LIMITER = { limit: vi.fn().mockRejectedValue(new Error('unexpected')) };
+    const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: 'internal_error', retryable: true } });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('useWebSearch=trueを未実装として400で拒否する', async () => {
     const env = environment(); const input = fixture(); input.preferences.useWebSearch = true;
     const response = await handleRequest(post(aiEndpoint, input, { Authorization: await authorization(env) }), env);

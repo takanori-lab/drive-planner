@@ -113,7 +113,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       if (!(await env.AI_RATE_LIMITER.limit({ key: SHARED_AI_RATE_LIMIT_KEY })).success) throw rateLimited();
       const input = validateSegmentCandidatesRequest(await parseBody(request));
       if (input.preferences.useWebSearch) throw new ApiError(400, 'invalid_request', 'Web Searchを利用する候補生成はまだ提供していません。');
-      if (!env.OPENAI_API_KEY) throw new Error('Worker configuration is incomplete');
+      if (!env.OPENAI_API_KEY) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。');
       const generated = await generateCandidates(input, env.OPENAI_API_KEY, fetcher, aiTimeoutMs);
       if (generated.status === 'needs_clarification') return Response.json({
         requestId: input.requestId, status: generated.status, clarificationMessage: generated.clarificationMessage,
@@ -129,7 +129,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       if (error.status === 405) headers.set('Allow', url.pathname === '/health' ? 'GET' : 'POST, OPTIONS');
       return errorResponse(error, headers);
     }
-    return errorResponse(new ApiError(500, 'internal_error', '一時的なエラーが発生しました。'), headers);
+    return errorResponse(new ApiError(500, 'internal_error', '一時的なエラーが発生しました。', true), headers);
   }
 }
 
