@@ -5,6 +5,8 @@ export type ErrorCode =
   | 'unsupported_media_type'
   | 'method_not_allowed'
   | 'not_found'
+  | 'unauthorized'
+  | 'rate_limited'
   | 'internal_error';
 
 export class ApiError extends Error {
