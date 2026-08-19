@@ -129,7 +129,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       if (error.status === 405) headers.set('Allow', url.pathname === '/health' ? 'GET' : 'POST, OPTIONS');
       return errorResponse(error, headers);
     }
-    return errorResponse(new ApiError(500, 'internal_error', '一時的なエラーが発生しました。', true), headers);
+    return errorResponse(new ApiError(500, 'internal_error', '一時的なエラーが発生しました。'), headers);
   }
 }
 

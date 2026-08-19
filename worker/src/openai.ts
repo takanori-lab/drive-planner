@@ -51,7 +51,7 @@ export type GeneratedCandidates =
   | { status: 'needs_clarification'; clarificationMessage: string; candidates: [] };
 
 function invalidResponse(): never {
-  throw new ApiError(502, 'ai_invalid_response', 'AIから有効な候補を取得できませんでした。', true);
+  throw new ApiError(502, 'ai_invalid_response', 'AIから有効な候補を取得できませんでした。');
 }
 
 function validString(value: unknown, min: number, max: number): value is string {
@@ -124,9 +124,9 @@ export async function generateCandidates(
   } finally {
     clearTimeout(timeout);
   }
-  if (response.status === 401 || response.status === 403 || response.status === 400) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。', true);
+  if (response.status === 401 || response.status === 403 || response.status === 400) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。');
   if (response.status === 429 || response.status >= 500) throw new ApiError(502, 'ai_unavailable', 'AIサービスを一時的に利用できません。', true);
-  if (!response.ok) throw new ApiError(502, 'ai_unavailable', 'AIサービスを一時的に利用できません。', true);
+  if (!response.ok) throw new ApiError(502, 'ai_unavailable', 'AIサービスを利用できません。');
   let raw: unknown;
   try { raw = await response.json(); } catch { return invalidResponse(); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return invalidResponse();

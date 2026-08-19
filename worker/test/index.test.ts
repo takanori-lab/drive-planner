@@ -249,7 +249,7 @@ describe('Drive Planner Worker', () => {
     const env = environment();
     const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
     expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({ error: { code: 'ai_invalid_response', retryable: true } });
+    expect(await response.json()).toMatchObject({ error: { code: 'ai_invalid_response', retryable: false } });
   });
 
   it.each([429, 500])('OpenAI %sをretryable errorにする', async (status) => {
@@ -262,14 +262,23 @@ describe('Drive Planner Worker', () => {
     expect(text).not.toContain('外部の詳細');
   });
 
-  it('OpenAI 401をraw bodyやSecretを漏らさないinternal errorにする', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response('認証詳細', { status: 401 }));
+  it.each([400, 401, 403])('OpenAI %sを再試行不可のinternal errorにし、raw bodyやSecretを漏らさない', async (status) => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('認証・リクエスト詳細', { status }));
     const env = environment();
     const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
     const text = await response.text();
     expect(response.status).toBe(500);
-    expect(text).not.toContain('認証詳細');
+    expect(JSON.parse(text)).toMatchObject({ error: { code: 'internal_error', retryable: false } });
+    expect(text).not.toContain('認証・リクエスト詳細');
     expect(text).not.toContain(env.OPENAI_API_KEY);
+  });
+
+  it('network errorをretryable errorにする', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('network error'));
+    const env = environment();
+    const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: 'ai_unavailable', retryable: true } });
   });
 
   it('timeoutをretryable errorにする', async () => {
@@ -286,6 +295,7 @@ describe('Drive Planner Worker', () => {
     const env = environment(); env.OPENAI_API_KEY = '';
     const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
     expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: 'internal_error', retryable: false } });
     expect(fetch).not.toHaveBeenCalled();
   });
 
