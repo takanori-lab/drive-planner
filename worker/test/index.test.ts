@@ -10,8 +10,12 @@ const TEST_PASSCODE = 'テスト専用プレースホルダー';
 const TEST_SIGNING_KEY = 'テスト専用の十分に長い署名鍵プレースホルダー';
 
 class FakeRateLimiter implements RateLimiter {
+  readonly keys: string[] = [];
   constructor(private readonly allowed = true) {}
-  async limit(): Promise<{ success: boolean }> { return { success: this.allowed }; }
+  async limit({ key }: { key: string }): Promise<{ success: boolean }> {
+    this.keys.push(key);
+    return { success: this.allowed };
+  }
 }
 
 function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean } = {}): Env {
@@ -76,6 +80,13 @@ describe('Drive Planner Worker', () => {
     expect(await response.json()).toMatchObject({ error: { code: 'rate_limited', retryable: true } });
   });
 
+  it('session rate limitにはCF-Connecting-IPを使う', async () => {
+    const env = environment();
+    const limiter = env.SESSION_RATE_LIMITER as FakeRateLimiter;
+    await handleRequest(post(sessionEndpoint, { passcode: TEST_PASSCODE }, { 'CF-Connecting-IP': '192.0.2.10' }), env);
+    expect(limiter.keys).toEqual(['192.0.2.10']);
+  });
+
   it('Authorizationなしと不正tokenを401で拒否する', async () => {
     expect((await handleRequest(post(aiEndpoint, fixture()), environment())).status).toBe(401);
     expect((await handleRequest(post(aiEndpoint, fixture(), { Authorization: 'Bearer invalid.token' }), environment())).status).toBe(401);
@@ -110,10 +121,21 @@ describe('Drive Planner Worker', () => {
     expect(await response.json()).toMatchObject({ error: { code: 'rate_limited' } });
   });
 
+  it('AI APIはtokenを再発行しても共有グループのRate Limit keyを使う', async () => {
+    const env = environment();
+    const limiter = env.AI_RATE_LIMITER as FakeRateLimiter;
+    const first = await authorization(env);
+    const second = await authorization(env);
+    await handleRequest(post(aiEndpoint, fixture(), { Authorization: first }), env);
+    await handleRequest(post(aiEndpoint, fixture(), { Authorization: second }), env);
+    expect(limiter.keys).toEqual(['drive-planner-shared-group-v1', 'drive-planner-shared-group-v1']);
+  });
+
   it('許可OriginのpreflightでAuthorizationを許可し、不許可Originを拒否する', async () => {
     const allowed = await handleRequest(new Request(aiEndpoint, { method: 'OPTIONS', headers: { Origin: productionOrigin } }), environment());
     const denied = await handleRequest(new Request(aiEndpoint, { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } }), environment());
     expect(allowed.status).toBe(204);
+    expect(allowed.headers.get('Access-Control-Allow-Methods')).toBe('POST, OPTIONS');
     expect(allowed.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
     expect(denied.status).toBe(403);
   });
@@ -122,6 +144,7 @@ describe('Drive Planner Worker', () => {
     const env = environment();
     const response = await handleRequest(post(aiEndpoint, fixture(), { Origin: origin, Authorization: await authorization(env) }), env);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+    expect(response.headers.get('Vary')).toBe('Origin');
   });
 
   it('不許可Originには従来どおりCORS許可ヘッダーを返さない', async () => {
@@ -139,5 +162,40 @@ describe('Drive Planner Worker', () => {
     expect((await handleRequest(post(aiEndpoint, missing, { Authorization: auth }), env)).status).toBe(400);
     const oversized = `"${'a'.repeat(MAX_BODY_BYTES)}"`;
     expect((await handleRequest(post(aiEndpoint, oversized, { Authorization: auth }), env)).status).toBe(413);
+  });
+
+  it('AI APIの不正methodを405とAllowヘッダー付きで拒否する', async () => {
+    const response = await handleRequest(new Request(aiEndpoint, { method: 'GET' }), environment());
+    expect(response.status).toBe(405);
+    expect(response.headers.get('Allow')).toBe('POST, OPTIONS');
+  });
+
+  it('認証後にapplication/json以外を415で拒否する', async () => {
+    const env = environment();
+    const response = await handleRequest(post(aiEndpoint, JSON.stringify(fixture()), {
+      Authorization: await authorization(env),
+      'Content-Type': 'text/plain',
+    }), env);
+    expect(response.status).toBe(415);
+    expect(await response.json()).toMatchObject({ error: { code: 'unsupported_media_type' } });
+  });
+
+  it('認証後も文字列長と既存候補件数の上限を検証する', async () => {
+    const env = environment();
+    const auth = await authorization(env);
+    const longText = fixture();
+    longText.preferences.freeText = 'あ'.repeat(1001);
+    expect((await handleRequest(post(aiEndpoint, longText, { Authorization: auth }), env)).status).toBe(400);
+
+    const many = fixture();
+    many.existingCandidates = Array.from({ length: 21 }, (_, index) => ({ name: `候補${index}`, locationNote: '' }));
+    expect((await handleRequest(post(aiEndpoint, many, { Authorization: auth }), env)).status).toBe(400);
+  });
+
+  it('認証後もcontract外フィールドを拒否する', async () => {
+    const env = environment();
+    const input = fixture();
+    (input.segment.before as Record<string, unknown>).id = 'local-only';
+    expect((await handleRequest(post(aiEndpoint, input, { Authorization: await authorization(env) }), env)).status).toBe(400);
   });
 });

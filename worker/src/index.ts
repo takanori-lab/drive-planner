@@ -5,6 +5,7 @@ import { createSessionToken, passcodeMatches, verifySessionToken } from './auth'
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
+const SHARED_AI_RATE_LIMIT_KEY = 'drive-planner-shared-group-v1';
 
 export interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -106,8 +107,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       if (request.method === 'OPTIONS') return preflight(request);
       if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
       if (!env?.SESSION_SIGNING_KEY || !env.AI_RATE_LIMITER) throw new Error('Worker configuration is incomplete');
-      const claims = await verifySessionToken(requireBearer(request), env.SESSION_SIGNING_KEY);
-      if (!(await env.AI_RATE_LIMITER.limit({ key: claims.sessionId })).success) throw rateLimited();
+      await verifySessionToken(requireBearer(request), env.SESSION_SIGNING_KEY);
+      if (!(await env.AI_RATE_LIMITER.limit({ key: SHARED_AI_RATE_LIMIT_KEY })).success) throw rateLimited();
       const input = validateSegmentCandidatesRequest(await parseBody(request));
       return Response.json({
         requestId: input.requestId,

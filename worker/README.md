@@ -25,14 +25,14 @@ bodyは32 KiB以下、既存候補は20件以下です。型、必須項目、�
 - `DRIVE_PLANNER_PASSCODE`
 - `SESSION_SIGNING_KEY`
 
-ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。本番deployの前に、担当者がCloudflare Dashboardで両方のSecretを設定してください。Secret不足時は設定内容をクライアントへ公開せず `internal_error` として扱います。
+ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。PRを `main` へマージする前に、担当者がCloudflare Dashboardで両方のSecretを登録してください。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。OpenAI APIは未接続のため、OpenAI API keyはまだ登録しません。実行時のSecret不足は設定内容をクライアントへ公開せず `internal_error` として扱います。
 
 ## Rate Limit
 
 Cloudflare Workers Rate Limiting bindingを2系統使用します。
 
 - `SESSION_RATE_LIMITER`: 接続元IPごとに **60秒あたり5回**。共有パスコードの総当たりを抑制します。
-- `AI_RATE_LIMITER`: 検証済みsession tokenのランダムなsession IDごとに **60秒あたり10回**。将来の外部API利用時の乱用を抑制します。
+- `AI_RATE_LIMITER`: 有効なsessionを持つ共有グループ全体で **60秒あたり10回**。tokenを再発行しても枠が増えない固定のgroup keyを使い、将来の外部API利用時の乱用を抑制します。
 
 上限到達時は統一形式の `rate_limited` エラーを429で返します。Rate Limitingは乱用を抑える補助策であり、将来OpenAIへ接続する際の最終的な課金上限の代替にはなりません。
 
@@ -52,11 +52,6 @@ npm run typecheck
 npm run dev
 ```
 
-レビュー後、Cloudflare DashboardでSecretを設定した担当者がproductionへ手動deployします。PRをマージしただけではdeployされません。
+GitHubリポジトリはCloudflare Workers Buildsと連携されており、production branchは `main` です。`main` へのpushまたはmergeによりCloudflare Workers Buildsが自動でbuild・deployします。GitHub Actions自身はWorkerをdeployしません。merge前にCloudflare Dashboardへrequired Secretを登録してください。
 
-```bash
-npx wrangler login
-npm run deploy
-```
-
-Worker名は `drive-planner-api` です。GitHub ActionsからWorkerをdeployする設定はありません。
+Worker名は `drive-planner-api` です。
