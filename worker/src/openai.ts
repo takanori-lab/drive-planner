@@ -1,5 +1,6 @@
 import { ApiError } from './errors';
 import type { SegmentCandidatesRequest } from './validation';
+import type { ResolvedGoogleMapsContext } from './google-maps';
 
 export const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 export const OPENAI_MODEL = 'gpt-5.6-luna';
@@ -39,7 +40,7 @@ export const OUTPUT_FORMAT = {
 
 const INSTRUCTIONS = `あなたはDrive Plannerの寄り道候補を提案します。確定地点AからBの間で、車だからこそ寄りやすく、予定外でも面白そうな候補を探してください。
 大きくルートを外れず車で寄りやすい、少し変わった施設・場所、景色のよい場所や道、地元らしい場所、食べ物、ニッチな場所を重視し、有名観光地だけを機械的に並べないでください。既存候補との重複を避け、freeText、MAIN地点、ドライブ全体のテーマを考慮してください。
-Web Searchは使用できません。googleMapsUrlを開いた、検索した、確認したとは絶対に表現せず、URLだけから場所を特定できたと装わないでください。地点名、locationNote、memoだけでA/BやMAINの具体的な場所を十分特定できない場合は別の場所を想定せずneeds_clarificationを返してください。営業時間、営業日、道路状況などの最新情報を確認済みと表現せず、最新確認が必要な内容はcheckItemsへ入れてください。
+Web Searchは使用できません。あなた自身がgoogleMapsUrlを開いた、検索した、確認したとは絶対に表現せず、元の短縮URL文字列だけから場所を推測しないでください。Workerが安全にリダイレクトを解決しURLから抽出したresolvedGoogleMapsContextがある場合は、通常の地点情報として場所の特定に利用できます。解決情報もなく、地点名、locationNote、memoだけでA/BやMAINの具体的な場所を十分特定できない場合は別の場所を想定せずneeds_clarificationを返してください。営業時間、営業日、道路状況などの最新情報を確認済みと表現せず、最新確認が必要な内容はcheckItemsへ入れてください。
 正常時は候補を必ず5件、clarificationMessageは空文字にしてください。確認が必要な場合は候補を0件にし、具体的なclarificationMessageを返してください。`;
 
 type Candidate = {
@@ -105,6 +106,7 @@ export async function generateCandidates(
   apiKey: string,
   fetcher: typeof fetch = fetch,
   timeoutMs = OPENAI_TIMEOUT_MS,
+  resolvedGoogleMapsContext: ResolvedGoogleMapsContext = {},
 ): Promise<GeneratedCandidates> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -113,7 +115,7 @@ export async function generateCandidates(
     response = await fetcher(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OPENAI_MODEL, reasoning: { effort: 'medium' }, store: false, max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS, instructions: INSTRUCTIONS, input: JSON.stringify(input), text: { format: OUTPUT_FORMAT } }),
+      body: JSON.stringify({ model: OPENAI_MODEL, reasoning: { effort: 'medium' }, store: false, max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS, instructions: INSTRUCTIONS, input: JSON.stringify({ ...input, resolvedGoogleMapsContext }), text: { format: OUTPUT_FORMAT } }),
       signal: controller.signal,
     });
   } catch (error) {

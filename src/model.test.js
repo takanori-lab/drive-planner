@@ -354,6 +354,8 @@ describe('plan model', () => {
     expect(isGoogleMapsUrl('https://goo.gl/maps/abc')).toBe(true);
     expect(safeGoogleMapsUrl(' javascript:alert(1) ')).toBe('');
     expect(safeGoogleMapsUrl('https://example.com/maps')).toBe('');
+    expect(safeGoogleMapsUrl('https://google.com.example.com/maps')).toBe('');
+    expect(safeGoogleMapsUrl('https://other.google.com/maps')).toBe('');
   });
 
   it('migrates only a whole legacy Maps URL and supplies missing fields', () => {

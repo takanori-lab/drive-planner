@@ -125,13 +125,14 @@ const ERROR_MESSAGES = {
 
 const DETOUR_LABELS = { small: '寄り道 小', medium: '寄り道 中', large: '寄り道 大' };
 
-function AiCandidateSheet({ plan, segmentIndex, onClose }) {
+export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
   const [extraRequest, setExtraRequest] = useState('');
   const [passcode, setPasscode] = useState('');
   const [session, setSession] = useState(() => readSession());
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [conditionsOpen, setConditionsOpen] = useState(false);
   const before = plan.points[segmentIndex];
   const after = plan.points[segmentIndex + 1];
 
@@ -153,54 +154,69 @@ function AiCandidateSheet({ plan, segmentIndex, onClose }) {
     setResult(response);
   };
 
-  const submit = async (event) => {
+  const authenticate = async (event) => {
+    event.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const created = await createSession(passcode);
+      saveSession(created);
+      setSession(created);
+      setPasscode('');
+    } catch (caught) {
+      handleError(caught, true);
+      setPasscode('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const search = async (event) => {
     event.preventDefault();
     if (loading) return;
     setLoading(true);
     setError('');
     setResult(null);
-    let authenticating = false;
     try {
-      let current = readSession();
-      if (sessionExpiredWhileSheetOpen(session, current)) {
+      const current = readSession();
+      if (sessionExpiredWhileSheetOpen(session, current) || !current) {
         setSession(null);
         setError('認証の有効期限が切れました。パスコードを入力してください。');
         return;
       }
-      if (!current) {
-        authenticating = true;
-        const created = await createSession(passcode);
-        saveSession(created);
-        current = created;
-        setSession(created);
-        setPasscode('');
-        authenticating = false;
-      }
       await requestCandidates(current.token);
     } catch (caught) {
-      handleError(caught, authenticating);
-      if (authenticating) setPasscode('');
+      handleError(caught);
     } finally {
       setLoading(false);
     }
   };
 
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form className="sheet ai-candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="ai-sheet-title" onSubmit={submit}>
+    <section className="sheet ai-candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="ai-sheet-title">
       <div className="sheet-grip" />
-      <div className="sheet-head"><div><span className="eyebrow">AI SUGGESTIONS</span><h2 id="ai-sheet-title">AIに候補を聞く</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
-      <p className="ai-description">この区間に立ち寄りやすい候補を5件提案します。</p>
+      <div className="sheet-head"><div><span className="eyebrow">DISCOVER A DETOUR</span><h2 id="ai-sheet-title">寄り道候補を探す</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
       <p className="route-context">{before.name} → {after.name}</p>
-      {!session && <label>Drive Plannerのパスコード<input autoFocus required type="password" autoComplete="current-password" value={passcode} onChange={(event) => setPasscode(event.target.value)} /></label>}
-      <label>追加の希望 <span>（任意）</span><textarea maxLength="300" value={extraRequest} onChange={(event) => setExtraRequest(event.target.value)} placeholder="例：景色がいい場所が気になる" /></label>
-      <button className="primary submit" disabled={loading || (!session && !passcode)}>{loading ? '候補を探しています…' : session ? 'AIに候補を探してもらう' : '認証して候補を探す'}</button>
+      {!session ? <form onSubmit={authenticate}>
+        <p className="ai-description">候補探索機能を利用するため、Drive Plannerのパスコードを入力してください。</p>
+        <label>Drive Plannerのパスコード<input autoFocus required type="password" autoComplete="current-password" value={passcode} onChange={(event) => setPasscode(event.target.value)} /></label>
+        <button className="primary submit" disabled={loading || !passcode}>{loading ? '確認しています…' : '続ける'}</button>
+      </form> : <form onSubmit={search}>
+        <p className="ai-description">この区間で、車で立ち寄りやすい場所を5件探します。</p>
+        <details className="search-conditions" open={conditionsOpen} onToggle={(event) => setConditionsOpen(event.currentTarget.open)}>
+          <summary>条件を追加（任意）</summary>
+          <label>希望する条件<textarea maxLength="300" value={extraRequest} onChange={(event) => setExtraRequest(event.target.value)} placeholder="例：景色がいい場所を多めに / 食べ物以外 / 30分以内の寄り道" /></label>
+        </details>
+        <button className="primary submit" disabled={loading}>{loading ? '候補を探しています…' : '候補を探す'}</button>
+      </form>}
       {loading && <p className="ai-loading" role="status">候補を探しています…</p>}
       {error && <p className="ai-error" role="alert">{error}</p>}
-      {result?.status === 'needs_clarification' && <div className="clarification" role="status"><strong>候補を探すために、もう少し場所の情報が必要です。</strong><p>{result.clarificationMessage}</p></div>}
+      {result?.status === 'needs_clarification' && <div className="clarification" role="status"><strong>「{after.name}」の場所を特定できませんでした。</strong><p>地点の場所情報を追加して、もう一度探してください。</p><details><summary>詳細を見る</summary><p>{result.clarificationMessage}</p></details></div>}
       {result?.status === 'ok' && <section className="ai-results" aria-label="AIの提案">
-        <h3>AIの提案</h3>
+        <h3>寄り道候補</h3>
         {result.candidates.map((candidate, index) => <article className="ai-result-card" key={candidate.resultId || `${candidate.name}-${index}`}>
-          <span className="ai-result-label">AIの提案 {index + 1}</span>
+          <span className="ai-result-label">候補 {index + 1}</span>
           <h4>{candidate.name}</h4>
           {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
           <p>{candidate.description}</p>
@@ -211,7 +227,7 @@ function AiCandidateSheet({ plan, segmentIndex, onClose }) {
           <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
         </article>)}
       </section>}
-    </form>
+    </section>
   </div>;
 }
 

@@ -21,7 +21,7 @@ export function isGoogleMapsUrl(value) {
     const host = url.hostname.toLowerCase();
     return host === 'maps.app.goo.gl'
       || (host === 'goo.gl' && (url.pathname === '/maps' || url.pathname.startsWith('/maps/')))
-      || ((host === 'google.com' || host.endsWith('.google.com'))
+      || ((host === 'google.com' || host === 'www.google.com' || host === 'maps.google.com')
         && (host === 'maps.google.com' || url.pathname === '/maps' || url.pathname.startsWith('/maps/')));
   } catch {
     return false;
