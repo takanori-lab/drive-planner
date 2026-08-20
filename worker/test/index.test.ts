@@ -140,9 +140,46 @@ describe('Drive Planner Worker', () => {
       text: { format: { type: 'json_schema', name: 'drive_planner_segment_candidates', strict: true } } });
     expect(request).not.toHaveProperty('tools');
     const sent = JSON.parse(request.input);
-    expect(sent).toEqual(fixture());
+    expect(sent).toEqual({ ...fixture(), resolvedGoogleMapsContext: {} });
     expect(request.input).not.toContain('localStorage');
     expect(request.input).not.toContain('internalId');
+  });
+
+  it('解決したGoogle Maps地点情報をOpenAI入力へ追加し、GoogleへSecretを送らない', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://www.google.com/maps/place/%E6%B9%96%E7%95%94%E3%81%AE%E3%83%91%E3%83%B3%E5%B1%8B/@35.5,138.7,15z' } }))
+      .mockResolvedValueOnce(successfulOutput());
+    const env = environment();
+    const requestBody = fixture();
+    requestBody.segment.after.googleMapsUrl = 'https://maps.app.goo.gl/example';
+    const response = await handleRequest(post(aiEndpoint, requestBody, { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [googleUrl, googleInit] = vi.mocked(fetch).mock.calls[0];
+    expect(googleUrl).toBe('https://maps.app.goo.gl/example');
+    expect(googleInit).toMatchObject({ method: 'GET', redirect: 'manual' });
+    expect(googleInit).not.toHaveProperty('headers');
+    expect(JSON.stringify(googleInit)).not.toContain(env.OPENAI_API_KEY);
+    expect(JSON.stringify(googleInit)).not.toContain('Authorization');
+    const openAiRequest = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
+    expect(JSON.parse(openAiRequest.input).resolvedGoogleMapsContext['segment.after']).toMatchObject({
+      label: '湖畔のパン屋', latitude: 35.5, longitude: 138.7,
+    });
+    expect(openAiRequest.instructions).toContain('resolvedGoogleMapsContext');
+    expect(openAiRequest.instructions).toContain('Web Searchは使用できません');
+  });
+
+  it('Google Maps URL解決失敗時も元の地点情報でOpenAI生成を続ける', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://evil.example/private' } }))
+      .mockResolvedValueOnce(successfulOutput());
+    const env = environment();
+    const requestBody = fixture();
+    requestBody.segment.before.googleMapsUrl = 'https://maps.app.goo.gl/broken';
+    const response = await handleRequest(post(aiEndpoint, requestBody, { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(200);
+    const openAiRequest = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
+    expect(JSON.parse(openAiRequest.input).resolvedGoogleMapsContext).toEqual({});
   });
 
   it('default exportのfetchはExecutionContextをOpenAI fetcherとして使わない', async () => {

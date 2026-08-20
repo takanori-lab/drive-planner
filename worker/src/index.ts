@@ -2,6 +2,7 @@ import { ApiError, errorResponse } from './errors';
 import { MAX_BODY_BYTES, validateSegmentCandidatesRequest } from './validation';
 import { createSessionToken, passcodeMatches, verifySessionToken } from './auth';
 import { generateCandidates } from './openai';
+import { resolveRequestGoogleMaps } from './google-maps';
 
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
@@ -114,7 +115,8 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       const input = validateSegmentCandidatesRequest(await parseBody(request));
       if (input.preferences.useWebSearch) throw new ApiError(400, 'invalid_request', 'Web Searchを利用する候補生成はまだ提供していません。');
       if (!env.OPENAI_API_KEY) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。');
-      const generated = await generateCandidates(input, env.OPENAI_API_KEY, fetcher, aiTimeoutMs);
+      const resolvedGoogleMaps = await resolveRequestGoogleMaps(input, fetcher);
+      const generated = await generateCandidates(input, env.OPENAI_API_KEY, fetcher, aiTimeoutMs, resolvedGoogleMaps);
       if (generated.status === 'needs_clarification') return Response.json({
         requestId: input.requestId, status: generated.status, clarificationMessage: generated.clarificationMessage,
         candidates: [], meta: { webSearchUsed: false, candidateCount: 0 },
