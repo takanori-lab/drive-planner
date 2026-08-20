@@ -1,6 +1,6 @@
 # Drive Planner API Worker
 
-将来のAI候補探索を受け持つCloudflare Workerです。GitHub Pages側との接続とOpenAI APIへの接続はまだ行わず、AI APIは認証後に固定候補を1件返します。データベース、Cloudflare Access、Turnstile、KV、D1は使用しません。
+AI候補探索を受け持つCloudflare Workerです。AI APIはOpenAI Responses APIへ接続済みですが、GitHub PagesのfrontendはまだWorkerへ接続していません。データベース、Cloudflare Access、Turnstile、KV、D1は使用しません。
 
 ## APIと認証
 
@@ -14,7 +14,9 @@
 
 ### `POST /v1/ai/segment-candidates`
 
-`Authorization: Bearer <session token>` と `Content-Type: application/json` が必須です。署名・期限を検証してからbodyを読み取ります。現在はOpenAIに未接続で、正常時は入力の `requestId` と従来どおりの固定候補を返します。
+`Authorization: Bearer <session token>` と `Content-Type: application/json` が必須です。署名・期限を検証してからbodyを読み取り、OpenAI Responses APIで候補を生成します。モデルは `gpt-5.6-luna`、reasoning effortは `medium`、出力上限は4,000 tokensです。`strict: true` のStructured Outputs（JSON Schema）を使用し、正常時は5候補を返します。Web Searchはまだ使用せず、要求された場合も実行せず安全な400エラーで通知します。
+
+場所を十分に特定できない場合は `needs_clarification` と確認メッセージを返します。OpenAIが生成した候補にはWorkerが `resultId` を付与し、Web Search未使用のため `sources` は常に空配列です。
 
 bodyは32 KiB以下、既存候補は20件以下です。型、必須項目、文字列長、実在日付、未知の項目も検証します。
 
@@ -24,8 +26,9 @@ bodyは32 KiB以下、既存候補は20件以下です。型、必須項目、�
 
 - `DRIVE_PLANNER_PASSCODE`
 - `SESSION_SIGNING_KEY`
+- `OPENAI_API_KEY`
 
-ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。PRを `main` へマージする前に、担当者がCloudflare Dashboardで両方のSecretを登録してください。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。OpenAI APIは未接続のため、OpenAI API keyはまだ登録しません。実行時のSecret不足は設定内容をクライアントへ公開せず `internal_error` として扱います。
+ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。PRを `main` へマージする前に、担当者がCloudflare Dashboardで `OPENAI_API_KEY` を含む3つのSecretを登録する必要があります。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
 
 ## Rate Limit
 

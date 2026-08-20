@@ -7,6 +7,9 @@ export type ErrorCode =
   | 'not_found'
   | 'unauthorized'
   | 'rate_limited'
+  | 'ai_unavailable'
+  | 'ai_timeout'
+  | 'ai_invalid_response'
   | 'internal_error';
 
 export class ApiError extends Error {

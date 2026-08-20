@@ -1,6 +1,7 @@
 import { ApiError, errorResponse } from './errors';
 import { MAX_BODY_BYTES, validateSegmentCandidatesRequest } from './validation';
 import { createSessionToken, passcodeMatches, verifySessionToken } from './auth';
+import { generateCandidates } from './openai';
 
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
@@ -14,6 +15,7 @@ export interface RateLimiter {
 export interface Env {
   DRIVE_PLANNER_PASSCODE: string;
   SESSION_SIGNING_KEY: string;
+  OPENAI_API_KEY: string;
   SESSION_RATE_LIMITER: RateLimiter;
   AI_RATE_LIMITER: RateLimiter;
 }
@@ -82,7 +84,7 @@ function validateSessionRequest(value: unknown): string {
   return input.passcode;
 }
 
-export async function handleRequest(request: Request, env: Env): Promise<Response> {
+export async function handleRequest(request: Request, env: Env, fetcher: typeof fetch = fetch, aiTimeoutMs?: number): Promise<Response> {
   const url = new URL(request.url);
   const headers = corsHeaders(request);
   try {
@@ -110,22 +112,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       await verifySessionToken(requireBearer(request), env.SESSION_SIGNING_KEY);
       if (!(await env.AI_RATE_LIMITER.limit({ key: SHARED_AI_RATE_LIMIT_KEY })).success) throw rateLimited();
       const input = validateSegmentCandidatesRequest(await parseBody(request));
-      return Response.json({
-        requestId: input.requestId,
-        status: 'ok',
-        candidates: [{
-          resultId: 'sample-1',
-          name: 'サンプル候補',
-          locationHint: 'サンプル地域',
-          description: '開発用の固定レスポンスです。',
-          reason: 'FrontendとBackendの接続確認に使用します。',
-          detourLevel: 'small',
-          detourNote: '開発用',
-          checkItems: [],
-          sources: [],
-        }],
-        meta: { webSearchUsed: false, candidateCount: 1 },
+      if (input.preferences.useWebSearch) throw new ApiError(400, 'invalid_request', 'Web Searchを利用する候補生成はまだ提供していません。');
+      if (!env.OPENAI_API_KEY) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。');
+      const generated = await generateCandidates(input, env.OPENAI_API_KEY, fetcher, aiTimeoutMs);
+      if (generated.status === 'needs_clarification') return Response.json({
+        requestId: input.requestId, status: generated.status, clarificationMessage: generated.clarificationMessage,
+        candidates: [], meta: { webSearchUsed: false, candidateCount: 0 },
       }, { headers });
+      return Response.json({ requestId: input.requestId, status: 'ok', candidates: generated.candidates.map((candidate) => ({
+        resultId: crypto.randomUUID(), ...candidate, sources: [],
+      })), meta: { webSearchUsed: false, candidateCount: 5 } }, { headers });
     }
     throw new ApiError(404, 'not_found', '指定されたAPIは見つかりません。');
   } catch (error) {

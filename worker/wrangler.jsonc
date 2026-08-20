@@ -8,7 +8,7 @@
     "enabled": true
   },
   "secrets": {
-    "required": ["DRIVE_PLANNER_PASSCODE", "SESSION_SIGNING_KEY"]
+    "required": ["DRIVE_PLANNER_PASSCODE", "SESSION_SIGNING_KEY", "OPENAI_API_KEY"]
   },
   "ratelimits": [
     {
