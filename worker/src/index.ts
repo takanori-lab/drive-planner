@@ -133,4 +133,8 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
   }
 }
 
-export default { fetch: handleRequest };
+export default {
+  fetch(request: Request, env: Env): Promise<Response> {
+    return handleRequest(request, env);
+  },
+};
