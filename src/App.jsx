@@ -3,7 +3,7 @@ import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
 import { buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
-import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, WorkerApiError } from './api';
+import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
   PointerSensor.configure({
@@ -162,6 +162,11 @@ function AiCandidateSheet({ plan, segmentIndex, onClose }) {
     let authenticating = false;
     try {
       let current = readSession();
+      if (sessionExpiredWhileSheetOpen(session, current)) {
+        setSession(null);
+        setError('認証の有効期限が切れました。パスコードを入力してください。');
+        return;
+      }
       if (!current) {
         authenticating = true;
         const created = await createSession(passcode);

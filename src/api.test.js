@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAiRequestBody, createSession, fetchAiCandidates, readSession, saveSession, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { buildAiRequestBody, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
 
 const plan = {
   title: 'テスト旅行',
@@ -47,6 +47,11 @@ describe('session', () => {
     saveSession({ token: 'old', expiresAt: '2020-01-01T00:00:00.000Z' }, target);
     expect(readSession(target, Date.parse('2021-01-01'))).toBeNull();
     expect(target.removeItem).toHaveBeenCalledWith(SESSION_STORAGE_KEY);
+  });
+  it('Sheet表示後にsessionが期限切れになったことを検知する', () => {
+    expect(sessionExpiredWhileSheetOpen({ token: 'old' }, null)).toBe(true);
+    expect(sessionExpiredWhileSheetOpen(null, null)).toBe(false);
+    expect(sessionExpiredWhileSheetOpen({ token: 'valid' }, { token: 'valid' })).toBe(false);
   });
 });
 

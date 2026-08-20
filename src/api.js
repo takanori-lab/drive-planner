@@ -52,6 +52,10 @@ export function clearSession(storage = globalThis.sessionStorage) {
   storage?.removeItem(SESSION_STORAGE_KEY);
 }
 
+export function sessionExpiredWhileSheetOpen(displayedSession, storedSession) {
+  return Boolean(displayedSession) && !storedSession;
+}
+
 export class WorkerApiError extends Error {
   constructor(httpStatus, code = 'internal_error', retryable = false) {
     super('Worker API request failed');
