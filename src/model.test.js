@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChatGptPrompt, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate } from './model';
+import { addAiResultsToSegment, aiResultToCandidate, buildChatGptPrompt, buildCompactCandidateMemo, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate } from './model';
 
 describe('plan model', () => {
   it('builds a ChatGPT prompt with all drive context', () => {
@@ -405,4 +405,102 @@ describe('plan model', () => {
     expect(prompt).not.toContain('地点の場所情報：\n- 東京駅：朝出発');
   });
 
+});
+
+
+describe('AI候補のcandidate変換', () => {
+  const aiResult = (overrides = {}) => ({
+    resultId: 'ai-result-1',
+    name: '  湖畔のパン屋  ',
+    locationHint: '  富士河口湖町 北岸  ',
+    description: '湖を眺められる小さなパン屋です。',
+    reason: '通り道から立ち寄りやすいため。',
+    detourLevel: 'small',
+    detourNote: '所要15分ほど',
+    checkItems: ['営業時間を確認', '駐車場を確認'],
+    ...overrides,
+  });
+
+  it('通常candidateの項目だけへ変換して新しいIDを発行する', () => {
+    const first = aiResultToCandidate(aiResult());
+    const second = aiResultToCandidate(aiResult());
+
+    expect(first.id).not.toBe('ai-result-1');
+    expect(first.id).not.toBe(second.id);
+    expect(first).toEqual({
+      id: expect.any(String),
+      name: '湖畔のパン屋',
+      googleMapsUrl: '',
+      locationNote: '富士河口湖町 北岸',
+      memo: '湖を眺められる小さなパン屋です。\n寄る理由：通り道から立ち寄りやすいため。\n寄り道 小：所要15分ほど\n確認：営業時間を確認 / 駐車場を確認',
+    });
+    expect(first.locationNote).not.toContain(first.memo.split('\n')[0]);
+    expect(Object.keys(first).sort()).toEqual(['googleMapsUrl', 'id', 'locationNote', 'memo', 'name']);
+  });
+
+  it('情報の有無に応じて不自然な区切りを作らず簡潔なmemoにする', () => {
+    expect(buildCompactCandidateMemo(aiResult({ reason: '', detourNote: '', checkItems: [] })))
+      .toBe('湖を眺められる小さなパン屋です。\n寄り道 小');
+    expect(buildCompactCandidateMemo(aiResult({ description: '', detourLevel: '', checkItems: [' 定休日を確認 ', '', null] })))
+      .toBe('寄る理由：通り道から立ち寄りやすいため。\n寄り道：所要15分ほど\n確認：定休日を確認');
+    expect(buildCompactCandidateMemo({})).toBe('');
+    expect(buildCompactCandidateMemo(aiResult({ description: '長い'.repeat(150) }))).toHaveLength(200);
+  });
+
+  it('選択した複数件を既存候補の末尾へ追加し、他区間は維持する', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    const otherKey = segmentKey(plan.points[1], plan.points[2]);
+    const existing = { id: 'existing', name: '既存候補', memo: '' };
+    const other = [{ id: 'other', name: '別区間', memo: '' }];
+    plan.candidates = { [key]: [existing], [otherKey]: other };
+
+    const outcome = addAiResultsToSegment(plan, 'tokyo-start', 'kawaguchiko', [
+      aiResult(), aiResult({ resultId: 'ai-2', name: '展望台' }),
+    ]);
+
+    expect(outcome.status).toBe('added');
+    expect(outcome.added).toHaveLength(2);
+    expect(outcome.plan.candidates[key][0]).toBe(existing);
+    expect(outcome.plan.candidates[key].map((candidate) => candidate.name)).toEqual(['既存候補', '湖畔のパン屋', '展望台']);
+    expect(outcome.plan.candidates[otherKey]).toBe(other);
+  });
+
+  it('未選択または対象の隣接区間がない場合はplanを変更しない', () => {
+    const plan = initialPlan();
+    expect(addAiResultsToSegment(plan, 'tokyo-start', 'kawaguchiko', [])).toMatchObject({ plan, status: 'no_selection' });
+    expect(addAiResultsToSegment(plan, 'tokyo-start', 'tokyo-goal', [aiResult()])).toMatchObject({ plan, status: 'segment_missing' });
+  });
+
+  it('正規化した同名候補と選択内の重複をスキップして既存候補を壊さない', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    const existing = { id: 'existing', name: '湖畔 の パン屋', memo: '既存メモ' };
+    plan.candidates[key] = [existing];
+
+    const outcome = addAiResultsToSegment(plan, 'tokyo-start', 'kawaguchiko', [
+      aiResult({ name: ' 湖畔　の　パン屋 ' }),
+      aiResult({ name: '展望台' }),
+      aiResult({ name: ' 展望台 ' }),
+    ]);
+
+    expect(outcome.status).toBe('added_with_duplicates');
+    expect(outcome.duplicates).toHaveLength(2);
+    expect(outcome.plan.candidates[key]).toHaveLength(2);
+    expect(outcome.plan.candidates[key][0]).toBe(existing);
+    expect(outcome.plan.candidates[key][1].name).toBe('展望台');
+  });
+
+  it('追加後は既存の編集・移動・削除・ルート追加処理を利用できる', () => {
+    const base = initialPlan();
+    const added = addAiResultsToSegment(base, 'tokyo-start', 'kawaguchiko', [aiResult()]).plan;
+    const fromKey = 'tokyo-start::kawaguchiko';
+    const toKey = 'kawaguchiko::tokyo-goal';
+    const id = added.candidates[fromKey][0].id;
+    const edited = updateCandidate(added, fromKey, id, { name: '編集済み', googleMapsUrl: '', locationNote: '山梨県', memo: '編集メモ' });
+    const moved = moveCandidate(edited, fromKey, toKey, id);
+    expect(moved.candidates[toKey][0]).toMatchObject({ id, name: '編集済み' });
+    expect(insertCandidate(moved, 1, id).points[2]).toMatchObject({ id, name: '編集済み' });
+    expect(removePoint(insertCandidate(moved, 1, id), 2).candidates[toKey][0]).toMatchObject({ name: '編集済み' });
+  });
 });

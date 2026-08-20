@@ -13,6 +13,68 @@ export const initialPlan = () => ({
 export const segmentKey = (a, b) => `${a.id}::${b.id}`;
 export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+function compactText(value) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+}
+
+export function buildCompactCandidateMemo(result) {
+  const description = compactText(result?.description);
+  const reason = compactText(result?.reason);
+  const detourNote = compactText(result?.detourNote);
+  const detourLevel = { small: '小', medium: '中', large: '大' }[compactText(result?.detourLevel)] || '';
+  const checks = Array.isArray(result?.checkItems) ? result.checkItems.map(compactText).filter(Boolean).slice(0, 2) : [];
+  const lines = [];
+  if (description) lines.push(description);
+  if (reason) lines.push(`寄る理由：${reason}`);
+  if (detourLevel || detourNote) lines.push(`寄り道${detourLevel ? ` ${detourLevel}` : ''}${detourNote ? `：${detourNote}` : ''}`);
+  if (checks.length) lines.push(`確認：${checks.join(' / ')}`);
+  const memo = lines.join('\n');
+  return memo.length <= 200 ? memo : `${memo.slice(0, 199).trimEnd()}…`;
+}
+
+export function aiResultToCandidate(result) {
+  return {
+    id: makeId(),
+    name: compactText(result?.name),
+    googleMapsUrl: '',
+    locationNote: compactText(result?.locationHint),
+    memo: buildCompactCandidateMemo(result),
+  };
+}
+
+function normalizedCandidateName(value) {
+  return compactText(value).normalize('NFKC').toLocaleLowerCase('ja').replace(/\s/g, '');
+}
+
+export function addAiResultsToSegment(plan, beforeId, afterId, results) {
+  const selectedResults = Array.isArray(results) ? results : [];
+  if (!selectedResults.length) return { plan, added: [], duplicates: [], status: 'no_selection' };
+  const segmentIndex = plan.points.findIndex((point, index) => point.id === beforeId && plan.points[index + 1]?.id === afterId);
+  if (segmentIndex < 0) return { plan, added: [], duplicates: [], status: 'segment_missing' };
+
+  const key = segmentKey(plan.points[segmentIndex], plan.points[segmentIndex + 1]);
+  const existing = plan.candidates[key] || [];
+  const knownNames = new Set(existing.map((candidate) => normalizedCandidateName(candidate.name)).filter(Boolean));
+  const added = [];
+  const duplicates = [];
+  selectedResults.forEach((result) => {
+    const name = normalizedCandidateName(result?.name);
+    if (!name || knownNames.has(name)) {
+      duplicates.push(result);
+    } else {
+      added.push(aiResultToCandidate(result));
+      knownNames.add(name);
+    }
+  });
+  if (!added.length) return { plan, added, duplicates, status: 'duplicates_only' };
+  return {
+    plan: { ...plan, candidates: { ...plan.candidates, [key]: [...existing, ...added] } },
+    added,
+    duplicates,
+    status: duplicates.length ? 'added_with_duplicates' : 'added',
+  };
+}
+
 export function isGoogleMapsUrl(value) {
   if (typeof value !== 'string' || !value.trim()) return false;
   try {

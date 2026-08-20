@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
@@ -125,15 +125,18 @@ const ERROR_MESSAGES = {
 
 const DETOUR_LABELS = { small: '寄り道 小', medium: '寄り道 中', large: '寄り道 大' };
 
-function AiCandidateSheet({ plan, segmentIndex, onClose }) {
+function AiCandidateSheet({ plan, beforeId, afterId, onAdd, onClose }) {
   const [extraRequest, setExtraRequest] = useState('');
   const [passcode, setPasscode] = useState('');
   const [session, setSession] = useState(() => readSession());
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [addMessage, setAddMessage] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(false);
-  const before = plan.points[segmentIndex];
-  const after = plan.points[segmentIndex + 1];
+  const segmentIndex = plan.points.findIndex((point, index) => point.id === beforeId && plan.points[index + 1]?.id === afterId);
+  const before = plan.points.find((point) => point.id === beforeId);
+  const after = plan.points.find((point) => point.id === afterId);
 
   const handleError = (caught, authenticating = false) => {
     if (caught instanceof WorkerApiError && caught.httpStatus === 401) {
@@ -144,13 +147,18 @@ function AiCandidateSheet({ plan, segmentIndex, onClose }) {
       } else setError('パスコードが正しくありません。');
     } else if (caught instanceof WorkerApiError) {
       setError(ERROR_MESSAGES[caught.code] || ERROR_MESSAGES.internal_error);
+    } else if (caught?.message === 'segment_missing') {
+      setError('対象の区間が現在のルートに存在しません。シートを閉じて区間を選び直してください。');
     } else setError('通信に失敗しました。接続を確認してもう一度お試しください。');
   };
 
   const requestCandidates = async (token) => {
+    if (segmentIndex < 0) throw new Error('segment_missing');
     const body = buildAiRequestBody(plan, segmentIndex, extraRequest.trim());
     const response = await fetchAiCandidates(token, body);
     setResult(response);
+    setSelectedIds([]);
+    setAddMessage('');
   };
 
   const submit = async (event) => {
@@ -190,7 +198,7 @@ function AiCandidateSheet({ plan, segmentIndex, onClose }) {
       <div className="sheet-grip" />
       <div className="sheet-head"><div><span className="eyebrow">AI SUGGESTIONS</span><h2 id="ai-sheet-title">AIに候補を聞く</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
       <p className="ai-description">この区間に立ち寄りやすい候補を5件提案します。</p>
-      <p className="route-context">{before.name} → {after.name}</p>
+      <p className="route-context">{before?.name || '削除された地点'} → {after?.name || '削除された地点'}</p>
       {!session && <label>Drive Plannerのパスコード<input autoFocus required type="password" autoComplete="current-password" value={passcode} onChange={(event) => setPasscode(event.target.value)} /></label>}
       <label>追加の希望 <span>（任意）</span><textarea maxLength="300" value={extraRequest} onChange={(event) => setExtraRequest(event.target.value)} placeholder="例：景色がいい場所が気になる" /></label>
       <button className="primary submit" disabled={loading || (!session && !passcode)}>{loading ? '候補を探しています…' : session ? 'AIに候補を探してもらう' : '認証して候補を探す'}</button>
@@ -199,17 +207,35 @@ function AiCandidateSheet({ plan, segmentIndex, onClose }) {
       {result?.status === 'needs_clarification' && <div className="clarification" role="status"><strong>候補を探すために、もう少し場所の情報が必要です。</strong><p>{result.clarificationMessage}</p></div>}
       {result?.status === 'ok' && <section className="ai-results" aria-label="AIの提案">
         <h3>AIの提案</h3>
-        {result.candidates.map((candidate, index) => <article className="ai-result-card" key={candidate.resultId || `${candidate.name}-${index}`}>
-          <span className="ai-result-label">AIの提案 {index + 1}</span>
-          <h4>{candidate.name}</h4>
-          {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
-          <p>{candidate.description}</p>
-          <div className="ai-reason"><strong>この区間で寄る理由</strong><p>{candidate.reason}</p></div>
-          <span className={`detour detour-${candidate.detourLevel}`}>{DETOUR_LABELS[candidate.detourLevel] || '寄り道'}</span>
-          {candidate.detourNote && <p>{candidate.detourNote}</p>}
-          {candidate.checkItems?.length > 0 && <div className="check-items"><strong>事前の確認事項</strong><ul>{candidate.checkItems.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></div>}
-          <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
-        </article>)}
+        <p className="ai-selection-guide">追加したい候補を選んでください（複数選択できます）。</p>
+        {result.candidates.map((candidate, index) => {
+          const selectionId = candidate.resultId || `${candidate.name}-${index}`;
+          const selected = selectedIds.includes(selectionId);
+          return <article className={`ai-result-card ${selected ? 'is-selected' : ''}`} key={selectionId}>
+            <label className="ai-result-selector"><input type="checkbox" checked={selected} onChange={() => { setSelectedIds((ids) => selected ? ids.filter((id) => id !== selectionId) : [...ids, selectionId]); setAddMessage(''); }} /><span>{selected ? '追加する候補に選択済み' : 'この候補を選択'}</span></label>
+            <span className="ai-result-label">AIの提案 {index + 1}</span>
+            <h4>{candidate.name}</h4>
+            {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
+            <p>{candidate.description}</p>
+            <div className="ai-reason"><strong>この区間で寄る理由</strong><p>{candidate.reason}</p></div>
+            <span className={`detour detour-${candidate.detourLevel}`}>{DETOUR_LABELS[candidate.detourLevel] || '寄り道'}</span>
+            {candidate.detourNote && <p>{candidate.detourNote}</p>}
+            {candidate.checkItems?.length > 0 && <div className="check-items"><strong>事前の確認事項</strong><ul>{candidate.checkItems.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></div>}
+            <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
+          </article>;
+        })}
+        {addMessage && <p className="ai-add-message" role="status">{addMessage}</p>}
+        <button type="button" className="primary ai-add-selected" disabled={!selectedIds.length} onClick={() => {
+          const selected = result.candidates.filter((candidate, index) => selectedIds.includes(candidate.resultId || `${candidate.name}-${index}`));
+          const outcome = onAdd(selected);
+          if (outcome.status === 'segment_missing') {
+            setAddMessage('対象の区間が現在のルートにないため、追加しませんでした。区間を選び直してください。');
+            return;
+          }
+          const duplicateText = outcome.duplicates.length ? ` 同名の候補${outcome.duplicates.length}件は重複のため追加していません。` : '';
+          setAddMessage(outcome.added.length ? `${outcome.added.length}件を候補へ追加しました。${duplicateText}` : `選択した候補はすでに追加されています。${duplicateText}`);
+          setSelectedIds([]);
+        }}>選んだ候補を追加{selectedIds.length ? `（${selectedIds.length}件）` : ''}</button>
       </section>}
     </form>
   </div>;
@@ -302,7 +328,7 @@ export default function App() {
     const before = plan.points[index];
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment(index)} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
@@ -358,6 +384,10 @@ export default function App() {
       }} />;
     })()}
     {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
-    {aiSegment !== null && <AiCandidateSheet plan={plan} segmentIndex={aiSegment} onClose={() => setAiSegment(null)} />}
+    {aiSegment !== null && <AiCandidateSheet plan={plan} beforeId={aiSegment.beforeId} afterId={aiSegment.afterId} onAdd={(selected) => {
+      const outcome = addAiResultsToSegment(plan, aiSegment.beforeId, aiSegment.afterId, selected);
+      if (outcome.plan !== plan) setPlan(outcome.plan);
+      return outcome;
+    }} onClose={() => setAiSegment(null)} />}
   </>;
 }
