@@ -118,12 +118,15 @@ export async function generateCandidates(
     });
   } catch (error) {
     if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      console.warn('openai_timeout', { model: OPENAI_MODEL });
       throw new ApiError(504, 'ai_timeout', 'AIの応答がタイムアウトしました。時間をおいて再度お試しください。', true);
     }
+    console.warn('openai_network_error', { model: OPENAI_MODEL });
     throw new ApiError(502, 'ai_unavailable', 'AIサービスを一時的に利用できません。', true);
   } finally {
     clearTimeout(timeout);
   }
+  if (!response.ok) console.warn('openai_upstream_error', { status: response.status, model: OPENAI_MODEL });
   if (response.status === 401 || response.status === 403 || response.status === 400) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。');
   if (response.status === 429 || response.status >= 500) throw new ApiError(502, 'ai_unavailable', 'AIサービスを一時的に利用できません。', true);
   if (!response.ok) throw new ApiError(502, 'ai_unavailable', 'AIサービスを利用できません。');

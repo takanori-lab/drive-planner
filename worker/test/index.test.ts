@@ -253,6 +253,7 @@ describe('Drive Planner Worker', () => {
   });
 
   it.each([429, 500])('OpenAI %sをretryable errorにする', async (status) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.mocked(fetch).mockResolvedValueOnce(new Response('外部の詳細', { status }));
     const env = environment();
     const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
@@ -260,6 +261,11 @@ describe('Drive Planner Worker', () => {
     const text = await response.text();
     expect(JSON.parse(text)).toMatchObject({ error: { code: 'ai_unavailable', retryable: true } });
     expect(text).not.toContain('外部の詳細');
+    expect(warning).toHaveBeenCalledWith('openai_upstream_error', { status, model: 'gpt-5.6-luna' });
+    const logged = JSON.stringify(warning.mock.calls);
+    expect(logged).not.toContain(env.OPENAI_API_KEY);
+    expect(logged).not.toContain(fixture().plan.mainPoint.name);
+    expect(logged).not.toContain('外部の詳細');
   });
 
   it.each([400, 401, 403])('OpenAI %sを再試行不可のinternal errorにし、raw bodyやSecretを漏らさない', async (status) => {
@@ -274,14 +280,19 @@ describe('Drive Planner Worker', () => {
   });
 
   it('network errorをretryable errorにする', async () => {
-    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('network error'));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('network error: 秘密の詳細'));
     const env = environment();
     const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ error: { code: 'ai_unavailable', retryable: true } });
+    expect(warning).toHaveBeenCalledWith('openai_network_error', { model: 'gpt-5.6-luna' });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('秘密の詳細');
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(env.OPENAI_API_KEY);
   });
 
   it('timeoutをretryable errorにする', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const hanging = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
     }));
@@ -289,6 +300,10 @@ describe('Drive Planner Worker', () => {
     const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env, hanging, 1);
     expect(response.status).toBe(504);
     expect(await response.json()).toMatchObject({ error: { code: 'ai_timeout', retryable: true } });
+    expect(warning).toHaveBeenCalledWith('openai_timeout', { model: 'gpt-5.6-luna' });
+    const logged = JSON.stringify(warning.mock.calls);
+    expect(logged).not.toContain(env.OPENAI_API_KEY);
+    expect(logged).not.toContain(fixture().preferences.freeText);
   });
 
   it('OPENAI_API_KEY不足はOpenAIを呼ばずinternal errorにする', async () => {
