@@ -2,7 +2,8 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { buildChatGptPrompt, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, WorkerApiError } from './api';
 
 const sensors = [
   PointerSensor.configure({
@@ -114,44 +115,98 @@ function Segment({ before, after, candidates, onAdd, onAsk, onEdit, onMove, onPr
   </section>;
 }
 
-function ChatGptSheet({ plan, segmentIndex, onClose }) {
+const ERROR_MESSAGES = {
+  rate_limited: 'リクエスト回数が多すぎます。少し待ってからもう一度お試しください。',
+  ai_timeout: 'AIからの応答がタイムアウトしました。時間をおいてもう一度お試しください。',
+  ai_unavailable: '現在、AIを一時的に利用できません。時間をおいてもう一度お試しください。',
+  ai_invalid_response: 'AIから有効な候補を取得できませんでした。もう一度お試しください。',
+  internal_error: '一時的なエラーが発生しました。時間をおいてもう一度お試しください。',
+};
+
+const DETOUR_LABELS = { small: '寄り道 小', medium: '寄り道 中', large: '寄り道 大' };
+
+function AiCandidateSheet({ plan, segmentIndex, onClose }) {
   const [extraRequest, setExtraRequest] = useState('');
-  const [prompt, setPrompt] = useState(() => buildChatGptPrompt(plan, segmentIndex));
-  const [copyState, setCopyState] = useState('idle');
-  const feedbackTimer = useRef(null);
+  const [passcode, setPasscode] = useState('');
+  const [session, setSession] = useState(() => readSession());
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const before = plan.points[segmentIndex];
   const after = plan.points[segmentIndex + 1];
 
-  useEffect(() => () => clearTimeout(feedbackTimer.current), []);
-  const updateRequest = (event) => {
-    const value = event.target.value;
-    setExtraRequest(value);
-    setPrompt(buildChatGptPrompt(plan, segmentIndex, value));
-    setCopyState('idle');
+  const handleError = (caught, authenticating = false) => {
+    if (caught instanceof WorkerApiError && caught.httpStatus === 401) {
+      if (!authenticating) {
+        clearSession();
+        setSession(null);
+        setError('認証の有効期限が切れました。パスコードを入力してください。');
+      } else setError('パスコードが正しくありません。');
+    } else if (caught instanceof WorkerApiError) {
+      setError(ERROR_MESSAGES[caught.code] || ERROR_MESSAGES.internal_error);
+    } else setError('通信に失敗しました。接続を確認してもう一度お試しください。');
   };
-  const copyPrompt = async () => {
-    clearTimeout(feedbackTimer.current);
+
+  const requestCandidates = async (token) => {
+    const body = buildAiRequestBody(plan, segmentIndex, extraRequest.trim());
+    const response = await fetchAiCandidates(token, body);
+    setResult(response);
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setError('');
+    setResult(null);
+    let authenticating = false;
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API is unavailable');
-      await navigator.clipboard.writeText(prompt);
-      setCopyState('copied');
-    } catch {
-      setCopyState('failed');
+      let current = readSession();
+      if (!current) {
+        authenticating = true;
+        const created = await createSession(passcode);
+        saveSession(created);
+        current = created;
+        setSession(created);
+        setPasscode('');
+        authenticating = false;
+      }
+      await requestCandidates(current.token);
+    } catch (caught) {
+      handleError(caught, authenticating);
+      if (authenticating) setPasscode('');
+    } finally {
+      setLoading(false);
     }
-    feedbackTimer.current = setTimeout(() => setCopyState('idle'), 2500);
   };
 
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="sheet chatgpt-sheet" role="dialog" aria-modal="true" aria-labelledby="chatgpt-sheet-title">
+    <form className="sheet ai-candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="ai-sheet-title" onSubmit={submit}>
       <div className="sheet-grip" />
-      <div className="sheet-head"><div><span className="eyebrow">FIND STOPS</span><h2 id="chatgpt-sheet-title">この区間の候補を探す</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
-      <p className="chatgpt-description">ChatGPTで候補を探すためのプロンプトを作成します。</p>
+      <div className="sheet-head"><div><span className="eyebrow">AI SUGGESTIONS</span><h2 id="ai-sheet-title">AIに候補を聞く</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <p className="ai-description">この区間に立ち寄りやすい候補を5件提案します。</p>
       <p className="route-context">{before.name} → {after.name}</p>
-      <label>追加の希望 <span>（任意）</span><input maxLength="120" value={extraRequest} onChange={updateRequest} placeholder="例：景色がいい場所が気になる" /></label>
-      <label>生成するプロンプト<textarea className="prompt-textarea" value={prompt} onChange={(event) => { setPrompt(event.target.value); setCopyState('idle'); }} /></label>
-      <button type="button" className="primary submit" onClick={copyPrompt}>{copyState === 'copied' ? 'コピーしました' : 'プロンプトをコピー'}</button>
-      {copyState === 'failed' && <p className="copy-error" role="status">コピーできませんでした。本文を選択して手動でコピーしてください。</p>}
-    </section>
+      {!session && <label>Drive Plannerのパスコード<input autoFocus required type="password" autoComplete="current-password" value={passcode} onChange={(event) => setPasscode(event.target.value)} /></label>}
+      <label>追加の希望 <span>（任意）</span><textarea maxLength="300" value={extraRequest} onChange={(event) => setExtraRequest(event.target.value)} placeholder="例：景色がいい場所が気になる" /></label>
+      <button className="primary submit" disabled={loading || (!session && !passcode)}>{loading ? '候補を探しています…' : session ? 'AIに候補を探してもらう' : '認証して候補を探す'}</button>
+      {loading && <p className="ai-loading" role="status">候補を探しています…</p>}
+      {error && <p className="ai-error" role="alert">{error}</p>}
+      {result?.status === 'needs_clarification' && <div className="clarification" role="status"><strong>候補を探すために、もう少し場所の情報が必要です。</strong><p>{result.clarificationMessage}</p></div>}
+      {result?.status === 'ok' && <section className="ai-results" aria-label="AIの提案">
+        <h3>AIの提案</h3>
+        {result.candidates.map((candidate, index) => <article className="ai-result-card" key={candidate.resultId || `${candidate.name}-${index}`}>
+          <span className="ai-result-label">AIの提案 {index + 1}</span>
+          <h4>{candidate.name}</h4>
+          {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
+          <p>{candidate.description}</p>
+          <div className="ai-reason"><strong>この区間で寄る理由</strong><p>{candidate.reason}</p></div>
+          <span className={`detour detour-${candidate.detourLevel}`}>{DETOUR_LABELS[candidate.detourLevel] || '寄り道'}</span>
+          {candidate.detourNote && <p>{candidate.detourNote}</p>}
+          {candidate.checkItems?.length > 0 && <div className="check-items"><strong>事前の確認事項</strong><ul>{candidate.checkItems.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></div>}
+          <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
+        </article>)}
+      </section>}
+    </form>
   </div>;
 }
 
@@ -217,7 +272,7 @@ function formatPlanDate(date) {
 }
 
 export default function App() {
-  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [chatGptSegment, setChatGptSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
+  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
@@ -242,7 +297,7 @@ export default function App() {
     const before = plan.points[index];
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setChatGptSegment(index)} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment(index)} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
@@ -298,6 +353,6 @@ export default function App() {
       }} />;
     })()}
     {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
-    {chatGptSegment !== null && <ChatGptSheet plan={plan} segmentIndex={chatGptSegment} onClose={() => setChatGptSegment(null)} />}
+    {aiSegment !== null && <AiCandidateSheet plan={plan} segmentIndex={aiSegment} onClose={() => setAiSegment(null)} />}
   </>;
 }
