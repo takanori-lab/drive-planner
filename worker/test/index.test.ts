@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionToken } from '../src/auth';
-import { type Env, handleRequest, type RateLimiter } from '../src/index';
+import worker, { type Env, handleRequest, type RateLimiter } from '../src/index';
 import { MAX_BODY_BYTES } from '../src/validation';
 
 const aiEndpoint = 'https://api.example.test/v1/ai/segment-candidates';
@@ -143,6 +143,19 @@ describe('Drive Planner Worker', () => {
     expect(sent).toEqual(fixture());
     expect(request.input).not.toContain('localStorage');
     expect(request.input).not.toContain('internalId');
+  });
+
+  it('default exportのfetchはExecutionContextをOpenAI fetcherとして使わない', async () => {
+    const env = environment();
+    const fakeExecutionContext = { waitUntil: vi.fn(), passThroughOnException: vi.fn() };
+    const request = post(aiEndpoint, fixture(), { Authorization: await authorization(env) });
+
+    const response = await Reflect.apply(worker.fetch, worker, [request, env, fakeExecutionContext]);
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fakeExecutionContext.waitUntil).not.toHaveBeenCalled();
+    expect(fakeExecutionContext.passThroughOnException).not.toHaveBeenCalled();
   });
 
   it('AI API rate limitを429で返す', async () => {
