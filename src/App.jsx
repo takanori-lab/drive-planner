@@ -125,6 +125,39 @@ const ERROR_MESSAGES = {
 
 const DETOUR_LABELS = { small: '寄り道 小', medium: '寄り道 中', large: '寄り道 大' };
 
+export async function authenticateCandidateSession(passcode) {
+  const created = await createSession(passcode);
+  saveSession(created);
+  return created;
+}
+
+export async function requestSegmentCandidates(plan, segmentIndex, extraRequest, displayedSession) {
+  const current = readSession();
+  if (sessionExpiredWhileSheetOpen(displayedSession, current) || !current) return { expired: true };
+  return { expired: false, result: await fetchAiCandidates(current.token, buildAiRequestBody(plan, segmentIndex, extraRequest.trim())) };
+}
+
+export const candidateLoadingMessage = (session) => session ? '候補を探しています…' : '確認しています…';
+
+export function AiCandidateResults({ result }) {
+  if (result?.status === 'needs_clarification') return <div className="clarification" role="status"><strong>地点の場所を特定できませんでした。</strong><p>地点の場所情報を追加して、もう一度探してください。</p><details><summary>詳細を見る</summary><p>{result.clarificationMessage}</p></details></div>;
+  if (result?.status !== 'ok') return null;
+  return <section className="ai-results" aria-label="AIの提案">
+    <h3>寄り道候補</h3>
+    {result.candidates.map((candidate, index) => <article className="ai-result-card" key={candidate.resultId || `${candidate.name}-${index}`}>
+      <span className="ai-result-label">候補 {index + 1}</span>
+      <h4>{candidate.name}</h4>
+      {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
+      <p>{candidate.description}</p>
+      <div className="ai-reason"><strong>この区間で寄る理由</strong><p>{candidate.reason}</p></div>
+      <span className={`detour detour-${candidate.detourLevel}`}>{DETOUR_LABELS[candidate.detourLevel] || '寄り道'}</span>
+      {candidate.detourNote && <p>{candidate.detourNote}</p>}
+      {candidate.checkItems?.length > 0 && <div className="check-items"><strong>事前の確認事項</strong><ul>{candidate.checkItems.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></div>}
+      <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
+    </article>)}
+  </section>;
+}
+
 export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
   const [extraRequest, setExtraRequest] = useState('');
   const [passcode, setPasscode] = useState('');
@@ -148,20 +181,13 @@ export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
     } else setError('通信に失敗しました。接続を確認してもう一度お試しください。');
   };
 
-  const requestCandidates = async (token) => {
-    const body = buildAiRequestBody(plan, segmentIndex, extraRequest.trim());
-    const response = await fetchAiCandidates(token, body);
-    setResult(response);
-  };
-
   const authenticate = async (event) => {
     event.preventDefault();
     if (loading) return;
     setLoading(true);
     setError('');
     try {
-      const created = await createSession(passcode);
-      saveSession(created);
+      const created = await authenticateCandidateSession(passcode);
       setSession(created);
       setPasscode('');
     } catch (caught) {
@@ -179,13 +205,13 @@ export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
     setError('');
     setResult(null);
     try {
-      const current = readSession();
-      if (sessionExpiredWhileSheetOpen(session, current) || !current) {
+      const response = await requestSegmentCandidates(plan, segmentIndex, extraRequest, session);
+      if (response.expired) {
         setSession(null);
         setError('認証の有効期限が切れました。パスコードを入力してください。');
         return;
       }
-      await requestCandidates(current.token);
+      setResult(response.result);
     } catch (caught) {
       handleError(caught);
     } finally {
@@ -210,23 +236,9 @@ export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
         </details>
         <button className="primary submit" disabled={loading}>{loading ? '候補を探しています…' : '候補を探す'}</button>
       </form>}
-      {loading && <p className="ai-loading" role="status">候補を探しています…</p>}
+      {loading && <p className="ai-loading" role="status">{candidateLoadingMessage(session)}</p>}
       {error && <p className="ai-error" role="alert">{error}</p>}
-      {result?.status === 'needs_clarification' && <div className="clarification" role="status"><strong>「{after.name}」の場所を特定できませんでした。</strong><p>地点の場所情報を追加して、もう一度探してください。</p><details><summary>詳細を見る</summary><p>{result.clarificationMessage}</p></details></div>}
-      {result?.status === 'ok' && <section className="ai-results" aria-label="AIの提案">
-        <h3>寄り道候補</h3>
-        {result.candidates.map((candidate, index) => <article className="ai-result-card" key={candidate.resultId || `${candidate.name}-${index}`}>
-          <span className="ai-result-label">候補 {index + 1}</span>
-          <h4>{candidate.name}</h4>
-          {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
-          <p>{candidate.description}</p>
-          <div className="ai-reason"><strong>この区間で寄る理由</strong><p>{candidate.reason}</p></div>
-          <span className={`detour detour-${candidate.detourLevel}`}>{DETOUR_LABELS[candidate.detourLevel] || '寄り道'}</span>
-          {candidate.detourNote && <p>{candidate.detourNote}</p>}
-          {candidate.checkItems?.length > 0 && <div className="check-items"><strong>事前の確認事項</strong><ul>{candidate.checkItems.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></div>}
-          <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
-        </article>)}
-      </section>}
+      <AiCandidateResults result={result} />
     </section>
   </div>;
 }
