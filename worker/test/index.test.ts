@@ -23,6 +23,8 @@ function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean } 
     DRIVE_PLANNER_PASSCODE: TEST_PASSCODE,
     SESSION_SIGNING_KEY: TEST_SIGNING_KEY,
     OPENAI_API_KEY: 'テスト用ダミーキー',
+    AI_LOG_EXPORT_KEY: 'test-export-key-placeholder',
+    AI_LOGS_DB: undefined as unknown as Env['AI_LOGS_DB'],
     SESSION_RATE_LIMITER: new FakeRateLimiter(options.sessionAllowed),
     AI_RATE_LIMITER: new FakeRateLimiter(options.aiAllowed),
   };
@@ -34,7 +36,7 @@ const candidate = (index: number) => ({
 });
 
 function openAiOutput(value: unknown, overrides: Record<string, unknown> = {}): Response {
-  return Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }], ...overrides });
+  return Response.json({ id: 'resp_test_123', status: 'completed', usage: { input_tokens: 100, output_tokens: 200 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }], ...overrides });
 }
 
 function successfulOutput(): Response {
@@ -67,6 +69,40 @@ describe('Drive Planner Worker', () => {
     const response = await handleRequest(new Request('https://api.example.test/health'), environment());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: 'ok' });
+  });
+
+  it('管理ページはSecretを埋め込まずAuthorization headerでexportする', async () => {
+    const env = environment();
+    const response = await handleRequest(new Request('https://api.example.test/admin/ai-logs'), env);
+    const html = await response.text();
+    expect(response.status).toBe(200); expect(html).toContain('AIログをエクスポート');
+    expect(html).toContain("Authorization:'Bearer '+key.value"); expect(html).not.toContain(env.AI_LOG_EXPORT_KEY);
+    expect(html).not.toContain('localStorage'); expect(html).not.toContain('sessionStorage');
+  });
+
+  it('export APIはSecretなしと不正Secretを401で拒否する', async () => {
+    const url = 'https://api.example.test/v1/admin/ai-logs/export'; const env = environment();
+    expect((await handleRequest(new Request(url), env)).status).toBe(401);
+    expect((await handleRequest(new Request(url, { headers: { Authorization: 'Bearer wrong' } }), env)).status).toBe(401);
+  });
+
+  it('正しいSecretでJSONLをno-storeの添付ファイルとして返す', async () => {
+    const env = environment(); const row = { id: 'log-1', log_version: 1, created_at: '2026-08-22T00:00:00.000Z', request_id: 'req-1', openai_response_id: 'resp-1', model: 'gpt-5.6-luna', prompt_version: 'segment-candidates-v1', instructions: '指示', input_json: '{"freeText":"景色"}', resolved_google_maps_context_json: '{}', output_json: '{"status":"ok","candidates":[]}', usage_json: '{"total_tokens":3}' };
+    const statement: any = { bind: vi.fn(() => statement), all: vi.fn(async () => ({ results: [row] })) };
+    env.AI_LOGS_DB = { exec: vi.fn(async () => ({})), prepare: vi.fn(() => statement) };
+    const response = await handleRequest(new Request('https://api.example.test/v1/admin/ai-logs/export', { headers: { Authorization: `Bearer ${env.AI_LOG_EXPORT_KEY}` } }), env);
+    expect(response.status).toBe(200); expect(response.headers.get('Content-Type')).toContain('application/x-ndjson');
+    expect(response.headers.get('Content-Disposition')).toContain('attachment; filename="drive-planner-ai-logs-'); expect(response.headers.get('Cache-Control')).toBe('no-store');
+    const exported = JSON.parse((await response.text()).trim()); expect(exported.input).toEqual({ freeText: '景色' }); expect(exported.output.status).toBe('ok');
+    expect(JSON.stringify(exported)).not.toContain(env.AI_LOG_EXPORT_KEY);
+  });
+
+  it('D1保存失敗時もAIの正常レスポンスを返す', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined); const env = environment();
+    env.AI_LOGS_DB = { exec: vi.fn(async () => { throw new Error('secret detail'); }), prepare: vi.fn() as any };
+    const response = await handleRequest(post(aiEndpoint, fixture(), { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(200); expect(warning).toHaveBeenCalledWith('ai_log_write_failed', { requestId: fixture().requestId });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('secret detail'); expect(JSON.stringify(warning.mock.calls)).not.toContain(fixture().preferences.freeText);
   });
 
   it('正しいpasscodeで8時間のsession tokenを発行する', async () => {
