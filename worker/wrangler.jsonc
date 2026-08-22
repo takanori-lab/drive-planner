@@ -8,8 +8,15 @@
     "enabled": true
   },
   "secrets": {
-    "required": ["DRIVE_PLANNER_PASSCODE", "SESSION_SIGNING_KEY", "OPENAI_API_KEY"]
+    "required": ["DRIVE_PLANNER_PASSCODE", "SESSION_SIGNING_KEY", "OPENAI_API_KEY", "AI_LOG_EXPORT_KEY"]
   },
+  "d1_databases": [
+    {
+      "binding": "AI_LOGS_DB",
+      "database_name": "drive-planner-ai-logs",
+      "database_id": "9cd33a62-b3f3-4244-b7d1-82fcdca389e4"
+    }
+  ],
   "ratelimits": [
     {
       "name": "SESSION_RATE_LIMITER",

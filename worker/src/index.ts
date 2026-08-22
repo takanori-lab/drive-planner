@@ -3,6 +3,8 @@ import { MAX_BODY_BYTES, validateSegmentCandidatesRequest } from './validation';
 import { createSessionToken, passcodeMatches, verifySessionToken } from './auth';
 import { generateCandidates } from './openai';
 import { resolveRequestGoogleMaps } from './google-maps';
+import { exportAiLogs, saveAiGenerationLog, type D1Database } from './ai-logs';
+import { ADMIN_PAGE } from './admin-page';
 
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
@@ -17,6 +19,8 @@ export interface Env {
   DRIVE_PLANNER_PASSCODE: string;
   SESSION_SIGNING_KEY: string;
   OPENAI_API_KEY: string;
+  AI_LOG_EXPORT_KEY: string;
+  AI_LOGS_DB: D1Database;
   SESSION_RATE_LIMITER: RateLimiter;
   AI_RATE_LIMITER: RateLimiter;
 }
@@ -94,6 +98,32 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       return Response.json({ status: 'ok' }, { headers });
     }
 
+    if (url.pathname === '/admin/ai-logs') {
+      if (request.method !== 'GET') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
+      return new Response(ADMIN_PAGE, { headers: {
+        'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'",
+        'Referrer-Policy': 'no-referrer',
+      } });
+    }
+
+    if (url.pathname === '/v1/admin/ai-logs/export') {
+      if (request.method !== 'GET') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
+      const authorization = request.headers.get('Authorization');
+      const submitted = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
+      if (!submitted || !env?.AI_LOG_EXPORT_KEY || !(await passcodeMatches(submitted, env.AI_LOG_EXPORT_KEY))) {
+        throw new ApiError(401, 'unauthorized', '認証が必要です。');
+      }
+      if (!env.AI_LOGS_DB) throw new Error('Worker configuration is incomplete');
+      const body = await exportAiLogs(env.AI_LOGS_DB);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      return new Response(body, { headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Content-Disposition': `attachment; filename="drive-planner-ai-logs-${stamp}.jsonl"`,
+        'Cache-Control': 'no-store',
+      } });
+    }
+
     if (url.pathname === '/session') {
       if (request.method === 'OPTIONS') return preflight(request);
       if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
@@ -117,6 +147,13 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       if (!env.OPENAI_API_KEY) throw new ApiError(500, 'internal_error', '一時的なエラーが発生しました。');
       const resolvedGoogleMaps = await resolveRequestGoogleMaps(input, fetcher);
       const generated = await generateCandidates(input, env.OPENAI_API_KEY, fetcher, aiTimeoutMs, resolvedGoogleMaps);
+      if (env.AI_LOGS_DB) {
+        try {
+          await saveAiGenerationLog(env.AI_LOGS_DB, input.requestId, resolvedGoogleMaps, generated);
+        } catch {
+          console.warn('ai_log_write_failed', { requestId: input.requestId });
+        }
+      }
       if (generated.status === 'needs_clarification') return Response.json({
         requestId: input.requestId, status: generated.status, clarificationMessage: generated.clarificationMessage,
         candidates: [], meta: { webSearchUsed: false, candidateCount: 0 },
@@ -128,7 +165,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
     throw new ApiError(404, 'not_found', '指定されたAPIは見つかりません。');
   } catch (error) {
     if (error instanceof ApiError) {
-      if (error.status === 405) headers.set('Allow', url.pathname === '/health' ? 'GET' : 'POST, OPTIONS');
+      if (error.status === 405) headers.set('Allow', ['/health', '/admin/ai-logs', '/v1/admin/ai-logs/export'].includes(url.pathname) ? 'GET' : 'POST, OPTIONS');
       return errorResponse(error, headers);
     }
     return errorResponse(new ApiError(500, 'internal_error', '一時的なエラーが発生しました。', true), headers);

@@ -38,7 +38,8 @@ export const OUTPUT_FORMAT = {
   },
 } as const;
 
-const INSTRUCTIONS = `あなたはDrive Plannerの寄り道候補を提案します。確定地点AからBの間で、車だからこそ寄りやすく、予定外でも面白そうな候補を探してください。
+export const PROMPT_VERSION = 'segment-candidates-v1';
+export const INSTRUCTIONS = `あなたはDrive Plannerの寄り道候補を提案します。確定地点AからBの間で、車だからこそ寄りやすく、予定外でも面白そうな候補を探してください。
 大きくルートを外れず車で寄りやすい、少し変わった施設・場所、景色のよい場所や道、地元らしい場所、食べ物、ニッチな場所を重視し、有名観光地だけを機械的に並べないでください。既存候補との重複を避け、freeText、MAIN地点、ドライブ全体のテーマを考慮してください。
 Web Searchは使用できません。あなた自身がgoogleMapsUrlを開いた、検索した、確認したとは絶対に表現せず、元の短縮URL文字列だけから場所を推測しないでください。Workerが安全にリダイレクトを解決しURLから抽出したresolvedGoogleMapsContextがある場合は、通常の地点情報として場所の特定に利用できます。解決情報もなく、地点名、locationNote、memoだけでA/BやMAINの具体的な場所を十分特定できない場合は別の場所を想定せずneeds_clarificationを返してください。営業時間、営業日、道路状況などの最新情報を確認済みと表現せず、最新確認が必要な内容はcheckItemsへ入れてください。
 正常時は候補を必ず5件、clarificationMessageは空文字にしてください。確認が必要な場合は候補を0件にし、具体的なclarificationMessageを返してください。`;
@@ -50,6 +51,15 @@ type Candidate = {
 export type GeneratedCandidates =
   | { status: 'ok'; clarificationMessage: ''; candidates: Candidate[] }
   | { status: 'needs_clarification'; clarificationMessage: string; candidates: [] };
+
+export type GenerationResult = GeneratedCandidates & {
+  openaiResponseId: string;
+  usage: unknown;
+  model: string;
+  promptVersion: string;
+  instructions: string;
+  input: Record<string, unknown>;
+};
 
 function invalidResponse(): never {
   throw new ApiError(502, 'ai_invalid_response', 'AIから有効な候補を取得できませんでした。');
@@ -107,7 +117,7 @@ export async function generateCandidates(
   fetcher: typeof fetch = fetch,
   timeoutMs = OPENAI_TIMEOUT_MS,
   resolvedGoogleMapsContext: ResolvedGoogleMapsContext = {},
-): Promise<GeneratedCandidates> {
+): Promise<GenerationResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
@@ -140,5 +150,15 @@ export async function generateCandidates(
     if (error instanceof ApiError) throw error;
     return invalidResponse();
   }
-  return validateOutput(parsed);
+  const generated = validateOutput(parsed);
+  const responseRecord = raw as Record<string, unknown>;
+  if (typeof responseRecord.id !== 'string' || !responseRecord.id) invalidResponse();
+  return Object.assign(generated, {
+    openaiResponseId: responseRecord.id,
+    usage: responseRecord.usage ?? null,
+    model: OPENAI_MODEL,
+    promptVersion: PROMPT_VERSION,
+    instructions: INSTRUCTIONS,
+    input: { ...input, resolvedGoogleMapsContext },
+  });
 }

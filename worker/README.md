@@ -1,6 +1,6 @@
 # Drive Planner API Worker
 
-AI候補探索を受け持つCloudflare Workerです。AI APIはOpenAI Responses APIへ接続済みですが、GitHub PagesのfrontendはまだWorkerへ接続していません。データベース、Cloudflare Access、Turnstile、KV、D1は使用しません。
+AI候補探索を受け持つCloudflare Workerです。AI APIはOpenAI Responses APIへ接続済みで、AI実行ログはCloudflare D1へ保存します。
 
 ## APIと認証
 
@@ -24,6 +24,14 @@ AI候補探索を受け持つCloudflare Workerです。AI APIはOpenAI Responses
 
 bodyは32 KiB以下、既存候補は20件以下です。型、必須項目、文字列長、実在日付、未知の項目も検証します。
 
+## AI実行ログとJSONL export
+
+OpenAIへ実際に送ったinput、解決したGoogle Maps文脈、instructions、生成結果、response ID、usageを、D1 `drive-planner-ai-logs` の `AI_LOGS_DB` bindingへ1実行1レコードで保存します。テーブルとindexは初回保存またはexport時に作成され、D1保存失敗はAI候補生成を失敗させません。OpenAI Platformの `store: true` も現時点では維持します。
+
+`promptVersion` はプロンプト別の品質比較に使います。**将来instructionsを変更するときは必ずpromptVersionも更新してください。**
+
+`/admin/ai-logs` の管理ページで `AI_LOG_EXPORT_KEY` を入力すると、AI品質分析用JSONLを時系列順でダウンロードできます。JSONLはルート情報、地点情報、Google Maps URL、freeText等を含むため厳重に扱ってください。API key、passcode、session token、Authorization header、export key、その他のSecretはD1にもJSONLにも保存しません。
+
 ## Secret
 
 次の名前をCloudflare Worker Secretとして使用します。**値をリポジトリやログへ保存しないでください。**
@@ -31,8 +39,9 @@ bodyは32 KiB以下、既存候補は20件以下です。型、必須項目、�
 - `DRIVE_PLANNER_PASSCODE`
 - `SESSION_SIGNING_KEY`
 - `OPENAI_API_KEY`
+- `AI_LOG_EXPORT_KEY`
 
-ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。PRを `main` へマージする前に、担当者がCloudflare Dashboardで `OPENAI_API_KEY` を含む3つのSecretを登録する必要があります。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
+ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。PRを `main` へマージする前に、担当者がCloudflare Dashboardで `OPENAI_API_KEY` と `AI_LOG_EXPORT_KEY` を含む4つのSecretを登録する必要があります。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
 
 ## Rate Limit
 
