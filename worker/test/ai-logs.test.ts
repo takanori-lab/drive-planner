@@ -24,8 +24,10 @@ const output = (status: 'ok' | 'needs_clarification'): GenerationResult => ({
 describe('AI実行ログ', () => {
   it('初回にテーブルとindexをIF NOT EXISTSで作成する', async () => {
     const db = new FakeD1(); await ensureAiLogSchema(db);
-    expect(db.schemas[0]).toContain('CREATE TABLE IF NOT EXISTS ai_generation_logs');
-    expect(db.schemas[0]).toContain('CREATE INDEX IF NOT EXISTS');
+    expect(db.schemas).toHaveLength(2);
+    expect(db.schemas[0]).toMatch(/^CREATE TABLE IF NOT EXISTS ai_generation_logs \(.+\);$/);
+    expect(db.schemas[0]).not.toContain('\n');
+    expect(db.schemas[1]).toBe('CREATE INDEX IF NOT EXISTS idx_ai_generation_logs_created_at_id ON ai_generation_logs(created_at, id);');
   });
   it.each(['ok', 'needs_clarification'] as const)('%sを必要情報とともに保存する', async (status) => {
     const db = new FakeD1(); await saveAiGenerationLog(db, 'request-123', { 'segment.before': { label: '東京', resolvedUrl: 'https://www.google.com/maps/place/example' } }, output(status));
