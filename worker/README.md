@@ -18,6 +18,8 @@ AI候補探索を受け持つCloudflare Workerです。AI APIはOpenAI Responses
 
 場所を十分に特定できない場合は `needs_clarification` と確認メッセージを返します。OpenAIが生成した候補にはWorkerが `resultId` を付与し、Web Search未使用のため `sources` は常に空配列です。
 
+寄り道候補生成ではResponses APIの `store: true` を有効にし、開発・品質改善時にOpenAI PlatformのLogsから入力・出力を確認できるようにしています。固定の識別用metadataだけを送り、API keyやsession tokenなどのSecretはmetadataに含めません。ログ保存が不要になった場合は `store: false` に戻せます。
+
 地点にGoogle Maps共有URLがある場合、Workerは許可したGoogle Mapsホストに限ってredirectを手動で追跡し、最終URLに含まれる地点名・query・緯度経度を一時的な地点特定の補助情報として利用します。各redirect先の検証、回数上限、短いtimeoutを設け、解決失敗時は地点名・場所メモによる従来の生成へfallbackします。レスポンス本文のスクレイピングやGoogle Maps API / Places APIは行わず、OpenAI Web Searchも使用しません。
 
 bodyは32 KiB以下、既存候補は20件以下です。型、必須項目、文字列長、実在日付、未知の項目も検証します。
