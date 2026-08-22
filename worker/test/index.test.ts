@@ -136,8 +136,20 @@ describe('Drive Planner Worker', () => {
     const [url, init] = vi.mocked(fetch).mock.calls[0];
     expect(url).toBe('https://api.openai.com/v1/responses');
     const request = JSON.parse(init?.body as string);
-    expect(request).toMatchObject({ model: 'gpt-5.6-luna', reasoning: { effort: 'medium' }, store: false, max_output_tokens: 4000,
+    expect(request).toMatchObject({ model: 'gpt-5.6-luna', reasoning: { effort: 'medium' }, store: true,
+      metadata: { app: 'drive-planner', feature: 'segment-candidates' }, max_output_tokens: 4000,
       text: { format: { type: 'json_schema', name: 'drive_planner_segment_candidates', strict: true } } });
+    expect(request.instructions).toContain('あなたはDrive Plannerの寄り道候補を提案します');
+    expect(request.text.format.schema).toMatchObject({
+      type: 'object',
+      required: ['status', 'clarificationMessage', 'candidates'],
+      properties: { candidates: { type: 'array', maxItems: 5 } },
+    });
+    expect(request.metadata).toEqual({ app: 'drive-planner', feature: 'segment-candidates' });
+    expect(JSON.stringify(request.metadata)).not.toContain(env.OPENAI_API_KEY);
+    expect(JSON.stringify(request.metadata)).not.toContain(env.DRIVE_PLANNER_PASSCODE);
+    expect(JSON.stringify(request.metadata)).not.toContain(env.SESSION_SIGNING_KEY);
+    expect(JSON.stringify(request.metadata)).not.toContain('景色がいいところ');
     expect(request).not.toHaveProperty('tools');
     const sent = JSON.parse(request.input);
     expect(sent).toEqual({ ...fixture(), resolvedGoogleMapsContext: {} });

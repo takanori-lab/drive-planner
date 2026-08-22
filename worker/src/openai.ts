@@ -115,7 +115,7 @@ export async function generateCandidates(
     response = await fetcher(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OPENAI_MODEL, reasoning: { effort: 'medium' }, store: false, max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS, instructions: INSTRUCTIONS, input: JSON.stringify({ ...input, resolvedGoogleMapsContext }), text: { format: OUTPUT_FORMAT } }),
+      body: JSON.stringify({ model: OPENAI_MODEL, reasoning: { effort: 'medium' }, store: true, metadata: { app: 'drive-planner', feature: 'segment-candidates' }, max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS, instructions: INSTRUCTIONS, input: JSON.stringify({ ...input, resolvedGoogleMapsContext }), text: { format: OUTPUT_FORMAT } }),
       signal: controller.signal,
     });
   } catch (error) {
