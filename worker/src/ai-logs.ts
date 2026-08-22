@@ -12,18 +12,12 @@ export interface D1Database {
   prepare(query: string): D1PreparedStatement;
 }
 
-const SCHEMA = `CREATE TABLE IF NOT EXISTS ai_generation_logs (
-  id TEXT PRIMARY KEY, log_version INTEGER NOT NULL, created_at TEXT NOT NULL,
-  request_id TEXT NOT NULL, openai_response_id TEXT NOT NULL, model TEXT NOT NULL,
-  prompt_version TEXT NOT NULL, instructions TEXT NOT NULL, input_json TEXT NOT NULL,
-  resolved_google_maps_context_json TEXT NOT NULL, output_json TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('ok', 'needs_clarification')), usage_json TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_ai_generation_logs_created_at_id
-ON ai_generation_logs(created_at, id);`;
+const CREATE_TABLE = "CREATE TABLE IF NOT EXISTS ai_generation_logs (id TEXT PRIMARY KEY, log_version INTEGER NOT NULL, created_at TEXT NOT NULL, request_id TEXT NOT NULL, openai_response_id TEXT NOT NULL, model TEXT NOT NULL, prompt_version TEXT NOT NULL, instructions TEXT NOT NULL, input_json TEXT NOT NULL, resolved_google_maps_context_json TEXT NOT NULL, output_json TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('ok', 'needs_clarification')), usage_json TEXT NOT NULL);";
+const CREATE_INDEX = 'CREATE INDEX IF NOT EXISTS idx_ai_generation_logs_created_at_id ON ai_generation_logs(created_at, id);';
 
 export async function ensureAiLogSchema(db: D1Database): Promise<void> {
-  await db.exec(SCHEMA);
+  await db.exec(CREATE_TABLE);
+  await db.exec(CREATE_INDEX);
 }
 
 export async function saveAiGenerationLog(
