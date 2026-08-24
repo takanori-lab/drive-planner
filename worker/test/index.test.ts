@@ -187,6 +187,7 @@ describe('Drive Planner Worker', () => {
       'largeはA→Bの自然な流れからかなり外れる可能性',
       '5件を揃えるために遠方・区間外へ探索範囲を広げてはいけません',
       'needs_clarification',
+      'MAINだけが曖昧であることを理由にneeds_clarificationを返さず',
       'resolvedGoogleMapsContext',
       'Web Searchは使用できません',
     ]) expect(request.instructions).toContain(rule);
