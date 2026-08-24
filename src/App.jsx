@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
 import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
@@ -139,12 +139,15 @@ export async function requestSegmentCandidates(plan, segmentIndex, extraRequest,
 
 export const candidateLoadingMessage = (session) => session ? '候補を探しています…' : '確認しています…';
 
-export function AiCandidateResults({ result }) {
+export function AiCandidateResults({ result, selectedIndexes = [], onToggle = () => undefined }) {
   if (result?.status === 'needs_clarification') return <div className="clarification" role="status"><strong>地点の場所を特定できませんでした。</strong><p>地点の場所情報を追加して、もう一度探してください。</p><details><summary>詳細を見る</summary><p>{result.clarificationMessage}</p></details></div>;
   if (result?.status !== 'ok') return null;
   return <section className="ai-results" aria-label="AIの提案">
     <h3>寄り道候補</h3>
-    {result.candidates.map((candidate, index) => <article className="ai-result-card" key={candidate.resultId || `${candidate.name}-${index}`}>
+    {result.candidates.map((candidate, index) => {
+      const selected = selectedIndexes.includes(index);
+      return <article className={selected ? 'ai-result-card is-selected' : 'ai-result-card'} key={candidate.resultId || `${candidate.name}-${index}`}>
+      <label className="ai-result-selector"><input type="checkbox" checked={selected} onChange={() => onToggle(index)} /><span>{selected ? '追加する候補に選択済み' : 'この候補を選択'}</span></label>
       <span className="ai-result-label">候補 {index + 1}</span>
       <h4>{candidate.name}</h4>
       {candidate.locationHint && <p className="ai-location">{candidate.locationHint}</p>}
@@ -154,18 +157,21 @@ export function AiCandidateResults({ result }) {
       {candidate.detourNote && <p>{candidate.detourNote}</p>}
       {candidate.checkItems?.length > 0 && <div className="check-items"><strong>事前の確認事項</strong><ul>{candidate.checkItems.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul></div>}
       <a className="ai-maps-link" href={buildGoogleMapsSearchUrl({ name: candidate.name, locationNote: candidate.locationHint })} target="_blank" rel="noopener noreferrer">↗ Googleマップで探す</a>
-    </article>)}
+    </article>;
+    })}
   </section>;
 }
 
-export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
+export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => ({ segmentFound: true, addedCount: 0, duplicateCount: 0 }), onClose, initialResult = null }) {
   const [extraRequest, setExtraRequest] = useState('');
   const [passcode, setPasscode] = useState('');
   const [session, setSession] = useState(() => readSession());
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(initialResult);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [conditionsOpen, setConditionsOpen] = useState(false);
+  const [selectedIndexes, setSelectedIndexes] = useState([]);
+  const [addMessage, setAddMessage] = useState('');
   const before = plan.points[segmentIndex];
   const after = plan.points[segmentIndex + 1];
 
@@ -204,6 +210,8 @@ export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
     setLoading(true);
     setError('');
     setResult(null);
+    setSelectedIndexes([]);
+    setAddMessage('');
     try {
       const response = await requestSegmentCandidates(plan, segmentIndex, extraRequest, session);
       if (response.expired) {
@@ -217,6 +225,19 @@ export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const addSelected = () => {
+    if (!selectedIndexes.length || result?.status !== 'ok') return;
+    const outcome = onAddCandidates(result.candidates.filter((_, index) => selectedIndexes.includes(index)));
+    if (!outcome.segmentFound) {
+      setAddMessage('対象の区間が現在のルートにないため、追加しませんでした。区間を選び直してください。');
+      return;
+    }
+    setSelectedIndexes([]);
+    if (!outcome.addedCount) setAddMessage('選択した候補はすでに追加されています。');
+    else if (outcome.duplicateCount) setAddMessage(`${outcome.addedCount}件を候補へ追加しました。同名の候補${outcome.duplicateCount}件は重複のため追加していません。`);
+    else setAddMessage(`${outcome.addedCount}件を候補へ追加しました。`);
   };
 
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -238,7 +259,8 @@ export function AiCandidateSheet({ plan, segmentIndex, onClose }) {
       </form>}
       {loading && <p className="ai-loading" role="status">{candidateLoadingMessage(session)}</p>}
       {error && <p className="ai-error" role="alert">{error}</p>}
-      <AiCandidateResults result={result} />
+      <AiCandidateResults result={result} selectedIndexes={selectedIndexes} onToggle={(index) => setSelectedIndexes((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index])} />
+      {result?.status === 'ok' && <div className="ai-add-actions"><button type="button" className="primary" disabled={!selectedIndexes.length} onClick={addSelected}>選んだ候補を追加（{selectedIndexes.length}件）</button>{addMessage && <p className="ai-add-message" role="status">{addMessage}</p>}</div>}
     </section>
   </div>;
 }
@@ -330,7 +352,7 @@ export default function App() {
     const before = plan.points[index];
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment(index)} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
@@ -386,6 +408,14 @@ export default function App() {
       }} />;
     })()}
     {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
-    {aiSegment !== null && <AiCandidateSheet plan={plan} segmentIndex={aiSegment} onClose={() => setAiSegment(null)} />}
+    {aiSegment !== null && (() => {
+      const segmentIndex = plan.points.findIndex((point, index) => point.id === aiSegment.beforeId && plan.points[index + 1]?.id === aiSegment.afterId);
+      const safeIndex = segmentIndex >= 0 ? segmentIndex : aiSegment.segmentIndex;
+      return <AiCandidateSheet plan={plan} segmentIndex={safeIndex} onAddCandidates={(results) => {
+        const outcome = addAiResultsToSegment(plan, aiSegment.beforeId, aiSegment.afterId, results);
+        if (outcome.plan !== plan) setPlan(outcome.plan);
+        return outcome;
+      }} onClose={() => setAiSegment(null)} />;
+    })()}
   </>;
 }

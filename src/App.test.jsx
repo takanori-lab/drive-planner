@@ -89,8 +89,24 @@ describe('寄り道候補探索Sheet', () => {
   it('正常responseの候補を表示する', () => {
     const candidates = Array.from({ length: 5 }, (_, index) => candidate(index + 1));
     const html = renderToStaticMarkup(<AiCandidateResults result={{ status: 'ok', candidates }} />);
-    expect(html.match(/class="ai-result-card"/gu)).toHaveLength(5);
+    expect(html.match(/class="ai-result-card(?: is-selected)?"/gu)).toHaveLength(5);
     expect(html).toContain('候補1');
     expect(html).toContain('Googleマップで探す');
+    expect(html.match(/type="checkbox"/gu)).toHaveLength(5);
+    expect(html).toContain('この候補を選択');
+  });
+
+  it('複数選択状態を表示できる', () => {
+    const candidates = Array.from({ length: 5 }, (_, index) => candidate(index + 1));
+    const html = renderToStaticMarkup(<AiCandidateResults result={{ status: 'ok', candidates }} selectedIndexes={[0, 2]} />);
+    expect(html.match(/追加する候補に選択済み/gu)).toHaveLength(2);
+    expect(html.match(/is-selected/gu)).toHaveLength(2);
+  });
+
+  it('選択0件では追加ボタンをdisabledで表示する', () => {
+    globalThis.sessionStorage = storage(validSession());
+    const candidates = Array.from({ length: 5 }, (_, index) => candidate(index + 1));
+    const html = renderToStaticMarkup(<AiCandidateSheet plan={initialPlan()} segmentIndex={0} initialResult={{ status: 'ok', candidates }} onClose={() => undefined} />);
+    expect(html).toContain('<button type="button" class="primary" disabled="">選んだ候補を追加（0件）</button>');
   });
 });
