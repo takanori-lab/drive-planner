@@ -33,6 +33,7 @@ describe('AI実行ログ', () => {
     const db = new FakeD1(); await saveAiGenerationLog(db, 'request-123', { 'segment.before': { label: '東京', resolvedUrl: 'https://www.google.com/maps/place/example' } }, output(status));
     const saved = JSON.stringify(db.inserted[0]);
     expect(db.inserted[0]).toContain(INSTRUCTIONS);
+    expect(db.inserted[0]).toContain('segment-candidates-v2');
     for (const expected of ['request-123', 'resp_123', 'gpt-5.6-luna', PROMPT_VERSION, 'freeText', '東京', status, 'input_tokens']) expect(saved).toContain(expected);
     for (const secret of ['OPENAI_API_KEY', 'DRIVE_PLANNER_PASSCODE', 'SESSION_SIGNING_KEY', 'session token', 'AI_LOG_EXPORT_KEY']) expect(saved).not.toContain(secret);
   });
