@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionToken } from '../src/auth';
 import worker, { type Env, handleRequest, type RateLimiter } from '../src/index';
 import { MAX_BODY_BYTES } from '../src/validation';
+import { INSTRUCTIONS, PROMPT_VERSION } from '../src/openai';
 
 const aiEndpoint = 'https://api.example.test/v1/ai/segment-candidates';
 const sessionEndpoint = 'https://api.example.test/session';
@@ -175,7 +176,21 @@ describe('Drive Planner Worker', () => {
     expect(request).toMatchObject({ model: 'gpt-5.6-luna', reasoning: { effort: 'medium' }, store: true,
       metadata: { app: 'drive-planner', feature: 'segment-candidates' }, max_output_tokens: 4000,
       text: { format: { type: 'json_schema', name: 'drive_planner_segment_candidates', strict: true } } });
-    expect(request.instructions).toContain('あなたはDrive Plannerの寄り道候補を提案します');
+    expect(PROMPT_VERSION).toBe('segment-candidates-v2');
+    expect(request.instructions).toBe(INSTRUCTIONS);
+    for (const rule of [
+      'segment.before → segment.afterが最優先',
+      'MAINを経由地点として扱ったり',
+      'freeTextは「何を探すか」に強く反映してよい一方、A→Bの地理的探索範囲を変更してはいけません',
+      'smallはA→Bの自然な移動範囲からほとんど外れず',
+      'mediumはA→Bの流れを維持できるが明確な寄り道・追加移動',
+      'largeはA→Bの自然な流れからかなり外れる可能性',
+      '5件を揃えるために遠方・区間外へ探索範囲を広げてはいけません',
+      'needs_clarification',
+      'MAINだけが曖昧であることを理由にneeds_clarificationを返さず',
+      'resolvedGoogleMapsContext',
+      'Web Searchは使用できません',
+    ]) expect(request.instructions).toContain(rule);
     expect(request.text.format.schema).toMatchObject({
       type: 'object',
       required: ['status', 'clarificationMessage', 'candidates'],
