@@ -13,6 +13,66 @@ export const initialPlan = () => ({
 export const segmentKey = (a, b) => `${a.id}::${b.id}`;
 export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+const compactText = (value) => typeof value === 'string' ? value.trim() : '';
+
+export function normalizedCandidateName(value) {
+  return compactText(value).normalize('NFKC').toLocaleLowerCase().replace(/\s+/gu, '');
+}
+
+export function buildCompactCandidateMemo(result) {
+  const parts = [];
+  const description = compactText(result?.description);
+  const reason = compactText(result?.reason);
+  const detourLevel = { small: '小', medium: '中', large: '大' }[result?.detourLevel] || '';
+  const detourNote = compactText(result?.detourNote);
+  const checkItems = (Array.isArray(result?.checkItems) ? result.checkItems : [])
+    .map(compactText)
+    .filter(Boolean)
+    .slice(0, 3);
+  if (description) parts.push(description);
+  if (reason) parts.push(`寄る理由：${reason}`);
+  if (detourLevel || detourNote) parts.push(`寄り道${detourLevel ? ` ${detourLevel}` : ''}${detourNote ? `：${detourNote}` : ''}`);
+  if (checkItems.length) parts.push(`確認：${checkItems.join(' / ')}`);
+  return parts.join('\n').slice(0, 200).trim();
+}
+
+export function aiResultToCandidate(result) {
+  return {
+    id: makeId(),
+    name: compactText(result?.name),
+    googleMapsUrl: '',
+    locationNote: compactText(result?.locationHint),
+    memo: buildCompactCandidateMemo(result),
+  };
+}
+
+export function addAiResultsToSegment(plan, beforeId, afterId, results) {
+  const segmentIndex = plan.points.findIndex((point, index) => point.id === beforeId && plan.points[index + 1]?.id === afterId);
+  if (segmentIndex < 0) return { plan, segmentFound: false, addedCount: 0, duplicateCount: 0 };
+
+  const key = segmentKey(plan.points[segmentIndex], plan.points[segmentIndex + 1]);
+  const existing = plan.candidates[key] || [];
+  const knownNames = new Set(existing.map((candidate) => normalizedCandidateName(candidate.name)).filter(Boolean));
+  const additions = [];
+  let duplicateCount = 0;
+  for (const result of results || []) {
+    const normalizedName = normalizedCandidateName(result?.name);
+    if (!normalizedName || knownNames.has(normalizedName)) {
+      duplicateCount += 1;
+      continue;
+    }
+    knownNames.add(normalizedName);
+    additions.push(aiResultToCandidate(result));
+  }
+  if (!additions.length) return { plan, segmentFound: true, addedCount: 0, duplicateCount };
+  return {
+    plan: { ...plan, candidates: { ...plan.candidates, [key]: [...existing, ...additions] } },
+    segmentFound: true,
+    addedCount: additions.length,
+    duplicateCount,
+  };
+}
+
 export function isGoogleMapsUrl(value) {
   if (typeof value !== 'string' || !value.trim()) return false;
   try {
