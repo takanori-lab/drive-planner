@@ -221,6 +221,29 @@ export function createPlan({ title, date, startName, mainName, goalName }) {
   };
 }
 
+// Plan and point editing deliberately preserve every property outside the
+// small, explicit set of editable fields. In particular, point identity and
+// role (`id` and `locked`) remain stable for segment/candidate associations.
+export function updatePlanInfo(plan, updates) {
+  return { ...plan, title: compactText(updates.title), date: compactText(updates.date) };
+}
+
+export function updatePoint(plan, pointId, updates) {
+  if (!plan.points.some((point) => point.id === pointId)) return plan;
+  return {
+    ...plan,
+    points: plan.points.map((point) => point.id === pointId ? {
+      ...point,
+      name: compactText(updates.name),
+      googleMapsUrl: compactText(updates.googleMapsUrl),
+      locationNote: compactText(updates.locationNote),
+      memo: compactText(updates.memo),
+      id: point.id,
+      ...(point.locked === undefined ? {} : { locked: point.locked }),
+    } : point),
+  };
+}
+
 // `locked` identifies a point's role. Only route endpoints are position-locked;
 // MAIN remains a protected point, but may be reordered between the endpoints.
 export const isEndpoint = (point) => point?.locked === 'start' || point?.locked === 'goal';

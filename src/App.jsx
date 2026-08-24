@@ -2,7 +2,7 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate } from './model';
+import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
 import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
@@ -30,8 +30,7 @@ function loadPlan() {
   } catch { return initialPlan(); }
 }
 
-function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragging }) {
-  const [editingField, setEditingField] = useState(null);
+export function PointCard({ point, index, total, onEdit, onRemove, handleRef, isDragging }) {
   const savedMapsUrl = safeGoogleMapsUrl(point.googleMapsUrl);
   const searchUrl = buildGoogleMapsSearchUrl(point);
 
@@ -39,36 +38,26 @@ function PointCard({ point, index, total, onChange, onRemove, handleRef, isDragg
     <div className="point-icon" aria-hidden="true">{point.locked === 'main' ? '★' : index === 0 ? '●' : index === total - 1 ? '⌂' : '•'}</div>
     <div className="point-copy">
       <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
-      {editingField === 'location' ? <div className="point-field-editor">
-        <textarea autoFocus maxLength="300" value={point.locationNote ?? ''} placeholder="河口湖の北側 / 富士河口湖町○○" onChange={(e) => onChange({ ...point, locationNote: e.target.value })} />
-        <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
-      </div> : <button type="button" className={`point-field-button location-note ${point.locationNote ? 'has-value' : ''}`} onClick={() => setEditingField('location')}>{point.locationNote ? <><span>場所</span>{point.locationNote}</> : '＋ 場所の補足'}</button>}
-      {editingField === 'memo' ? <div className="point-field-editor">
-        <textarea autoFocus value={point.memo ?? ''} placeholder="この地点のメモ" onChange={(e) => onChange({ ...point, memo: e.target.value })} />
-        <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
-      </div> : <button type="button" className="point-field-button" onClick={() => setEditingField('memo')}>{point.memo || '＋ メモを追加'}</button>}
+      {point.locationNote && <p className="point-location"><span>場所</span>{point.locationNote}</p>}
+      {point.memo && <p className="point-memo">{point.memo}</p>}
       <div className="maps-actions">
         <a href={savedMapsUrl || searchUrl} target="_blank" rel="noopener noreferrer">↗ Googleマップで{savedMapsUrl ? '開く' : '探す'}</a>
-        <button type="button" onClick={() => setEditingField('maps')}>{savedMapsUrl ? 'GoogleマップURLを編集' : '＋ GoogleマップURLを登録'}</button>
+        <button type="button" className="point-edit" onClick={onEdit}>編集</button>
       </div>
-      {editingField === 'maps' && <div className="point-field-editor maps-editor">
-        <label>GoogleマップURL<input autoFocus type="url" value={point.googleMapsUrl ?? ''} placeholder="https://maps.app.goo.gl/..." onChange={(e) => onChange({ ...point, googleMapsUrl: e.target.value })} /></label>
-        <button type="button" className="text-button" onClick={() => setEditingField(null)}>完了</button>
-      </div>}
       {isRemovable(point) && <button className="remove-point" onClick={onRemove}>ルートから外す</button>}
     </div>
     <button ref={handleRef} className="drag-handle" aria-label={`${point.name}を並べ替え`} disabled={!isDraggable(point)}>⠿</button>
   </article>;
 }
 
-function RouteItem({ point, index, pointIndex, total, children, onChange, onRemove }) {
+function RouteItem({ point, index, pointIndex, total, children, onEdit, onRemove }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: point.id,
     index,
   });
 
   return <div ref={ref} className={`route-item ${isDragging ? 'is-dragging' : ''}`}>
-    <PointCard point={point} index={pointIndex} total={total} onChange={onChange} onRemove={onRemove} handleRef={handleRef} isDragging={isDragging} />
+    <PointCard point={point} index={pointIndex} total={total} onEdit={onEdit} onRemove={onRemove} handleRef={handleRef} isDragging={isDragging} />
     {children}
   </div>;
 }
@@ -280,19 +269,52 @@ function MoveCandidateSheet({ candidate, currentRoute, destinations, onClose, on
   </div>;
 }
 
-function CandidateSheet({ route, initialName = '', initialGoogleMapsUrl = '', initialLocationNote = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
+function PlaceFields({ name, setName, googleMapsUrl, setGoogleMapsUrl, locationNote, setLocationNote, memo, setMemo, autoFocus = false }) {
+  return <>
+    <label>場所名<input autoFocus={autoFocus} required maxLength="60" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：湖畔のパン屋" /></label>
+    <a className={`maps-search-link ${name.trim() ? '' : 'disabled'}`} href={buildGoogleMapsSearchUrl({ name, locationNote }) || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!name.trim()} onClick={(event) => !name.trim() && event.preventDefault()}>↗ Googleマップで探す</a>
+    <label>GoogleマップURL <span>（任意）</span><input type="url" value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)} placeholder="https://maps.app.goo.gl/..." /></label>
+    <label>場所の補足 <span>（任意）</span><textarea maxLength="300" value={locationNote} onChange={(e) => setLocationNote(e.target.value)} placeholder="河口湖の北側 / 富士河口湖町○○" /></label>
+    <label>メモ <span>（任意）</span><textarea maxLength="200" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="気になること、寄りたい時間など" /></label>
+  </>;
+}
+
+export function CandidateSheet({ route, initialName = '', initialGoogleMapsUrl = '', initialLocationNote = '', initialMemo = '', mode = 'new', onClose, onSubmit }) {
   const [name, setName] = useState(initialName); const [googleMapsUrl, setGoogleMapsUrl] = useState(initialGoogleMapsUrl); const [locationNote, setLocationNote] = useState(initialLocationNote); const [memo, setMemo] = useState(initialMemo);
   const isEditing = mode === 'edit';
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
     <form className="sheet candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onSubmit={(e) => { e.preventDefault(); if (name.trim()) onSubmit(name.trim(), googleMapsUrl.trim(), locationNote.trim(), memo.trim()); }}>
       <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">{isEditing ? 'EDIT STOP' : 'NEW STOP'}</span><h2 id="sheet-title">立ち寄り候補を{isEditing ? '編集' : '追加'}</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
       <p className="route-context">{route}</p>
-      <label>場所名<input autoFocus required maxLength="60" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：湖畔のパン屋" /></label>
-      <a className={`maps-search-link ${name.trim() ? '' : 'disabled'}`} href={buildGoogleMapsSearchUrl({ name, locationNote }) || undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!name.trim()} onClick={(event) => !name.trim() && event.preventDefault()}>↗ Googleマップで探す</a>
-      <label>GoogleマップURL <span>（任意）</span><input type="url" value={googleMapsUrl} onChange={(e) => setGoogleMapsUrl(e.target.value)} placeholder="https://maps.app.goo.gl/..." /></label>
-      <label>場所の補足 <span>（任意）</span><textarea maxLength="300" value={locationNote} onChange={(e) => setLocationNote(e.target.value)} placeholder="河口湖の北側 / 富士河口湖町○○" /></label>
-      <label>メモ <span>（任意）</span><textarea maxLength="200" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="気になること、寄りたい時間など" /></label>
+      <PlaceFields {...{ name, setName, googleMapsUrl, setGoogleMapsUrl, locationNote, setLocationNote, memo, setMemo }} autoFocus />
       <button className="primary submit" disabled={!name.trim()}>{isEditing ? '変更を保存' : '候補として保存'}</button>
+    </form>
+  </div>;
+}
+
+export function PointEditSheet({ point, onClose, onSubmit }) {
+  const [name, setName] = useState(point.name); const [googleMapsUrl, setGoogleMapsUrl] = useState(point.googleMapsUrl ?? ''); const [locationNote, setLocationNote] = useState(point.locationNote ?? ''); const [memo, setMemo] = useState(point.memo ?? '');
+  const nameChanged = name.trim() !== point.name.trim();
+  const hasExistingDetails = Boolean(point.googleMapsUrl?.trim() || point.locationNote?.trim() || point.memo?.trim());
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="sheet candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="point-edit-title" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onSubmit({ name: name.trim(), googleMapsUrl: googleMapsUrl.trim(), locationNote: locationNote.trim(), memo: memo.trim() }); }}>
+      <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">EDIT STOP</span><h2 id="point-edit-title">場所情報を編集</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <p className="route-context">{point.locked === 'start' ? 'START' : point.locked === 'main' ? 'MAIN' : point.locked === 'goal' ? 'GOAL' : 'ルート地点'}</p>
+      <PlaceFields {...{ name, setName, googleMapsUrl, setGoogleMapsUrl, locationNote, setLocationNote, memo, setMemo }} autoFocus />
+      {nameChanged && hasExistingDetails && <p className="edit-warning" role="status">地点名を変更した場合は、登録済みの場所情報も確認してください。</p>}
+      <button className="primary submit" disabled={!name.trim()}>変更を保存</button>
+    </form>
+  </div>;
+}
+
+export function PlanInfoSheet({ plan, onClose, onSubmit }) {
+  const [title, setTitle] = useState(plan.title ?? ''); const [date, setDate] = useState(plan.date ?? '');
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <form className="sheet plan-info-sheet" role="dialog" aria-modal="true" aria-labelledby="plan-info-title" onSubmit={(event) => { event.preventDefault(); if (title.trim() && date) onSubmit({ title: title.trim(), date }); }}>
+      <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">EDIT DRIVE</span><h2 id="plan-info-title">ドライブ情報を編集</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <label>ドライブ名<input autoFocus required maxLength="60" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+      <label>日付<input required type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+      <button className="primary submit" disabled={!title.trim() || !date}>変更を保存</button>
     </form>
   </div>;
 }
@@ -327,12 +349,11 @@ function formatPlanDate(date) {
 }
 
 export default function App() {
-  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [saved, setSaved] = useState(true);
+  const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
   useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
-  const updatePoint = (index, point) => setPlan((old) => ({ ...old, points: old.points.map((p, i) => i === index ? point : p) }));
   const reset = () => { if (window.confirm('現在のドライブ内容を削除して、サンプルプランに戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
   const submitNewPlan = (values) => {
     if (!window.confirm('現在のドライブ内容を新しいドライブに置き換えます。よろしいですか？')) return;
@@ -356,23 +377,23 @@ export default function App() {
   };
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
-    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
+    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="hero-actions"><button className="edit-drive" onClick={() => setIsEditingPlan(true)}>ドライブ情報を編集</button><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button></div><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
           <div className="route-item route-endpoint">
-            <PointCard point={start} index={0} total={plan.points.length} onChange={(point) => updatePoint(0, point)} />
+            <PointCard point={start} index={0} total={plan.points.length} onEdit={() => setPointSheetId(start.id)} />
             {renderSegment(0)}
           </div>
           <div className="sortable-region">
             {middlePoints.map((point, sortableIndex) => {
               const pointIndex = sortableIndex + 1;
-              return <RouteItem key={point.id} point={point} index={sortableIndex} pointIndex={pointIndex} total={plan.points.length} onChange={(updated) => updatePoint(pointIndex, updated)} onRemove={() => setPlan((old) => removePoint(old, pointIndex))}>
+              return <RouteItem key={point.id} point={point} index={sortableIndex} pointIndex={pointIndex} total={plan.points.length} onEdit={() => setPointSheetId(point.id)} onRemove={() => setPlan((old) => removePoint(old, pointIndex))}>
                 {renderSegment(pointIndex)}
               </RouteItem>;
             })}
           </div>
           <div className="route-item route-endpoint">
-            <PointCard point={goal} index={plan.points.length - 1} total={plan.points.length} onChange={(point) => updatePoint(plan.points.length - 1, point)} />
+            <PointCard point={goal} index={plan.points.length - 1} total={plan.points.length} onEdit={() => setPointSheetId(goal.id)} />
           </div>
         </section>
       </DragDropProvider>
@@ -408,6 +429,12 @@ export default function App() {
       }} />;
     })()}
     {isCreating && <CreatePlanSheet onClose={() => setIsCreating(false)} onSubmit={submitNewPlan} />}
+    {isEditingPlan && <PlanInfoSheet plan={plan} onClose={() => setIsEditingPlan(false)} onSubmit={(updates) => { setPlan((old) => updatePlanInfo(old, updates)); setIsEditingPlan(false); }} />}
+    {pointSheetId && (() => {
+      const point = plan.points.find((item) => item.id === pointSheetId);
+      if (!point) return null;
+      return <PointEditSheet point={point} onClose={() => setPointSheetId(null)} onSubmit={(updates) => { setPlan((old) => updatePoint(old, pointSheetId, updates)); setPointSheetId(null); }} />;
+    })()}
     {aiSegment !== null && (() => {
       const segmentIndex = plan.points.findIndex((point, index) => point.id === aiSegment.beforeId && plan.points[index + 1]?.id === aiSegment.afterId);
       const safeIndex = segmentIndex >= 0 ? segmentIndex : aiSegment.segmentIndex;

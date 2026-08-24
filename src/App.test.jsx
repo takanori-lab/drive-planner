@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AiCandidateResults, AiCandidateSheet, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
+import { AiCandidateResults, AiCandidateSheet, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
 import { initialPlan } from './model';
 import { SESSION_STORAGE_KEY } from './api';
 
@@ -15,6 +15,47 @@ function storage(initialSession = null) {
 
 const validSession = () => ({ token: 'valid-session-token', expiresAt: new Date(Date.now() + 60_000).toISOString() });
 const candidate = (index) => ({ resultId: `result-${index}`, name: `候補${index}`, locationHint: '山梨県', description: '説明', reason: '理由', detourLevel: 'small', detourNote: '少し寄り道', checkItems: ['営業時間'] });
+
+describe('既存ドライブ編集UI', () => {
+  it('現在値入りのドライブ情報編集Sheetを表示する', () => {
+    const html = renderToStaticMarkup(<PlanInfoSheet plan={{ title: '夏のドライブ', date: '2026-08-24' }} onClose={() => undefined} onSubmit={() => undefined} />);
+    expect(html).toContain('ドライブ情報を編集');
+    expect(html).toContain('value="夏のドライブ"');
+    expect(html).toContain('type="date"');
+    expect(html).toContain('value="2026-08-24"');
+    expect(html).toContain('変更を保存');
+  });
+
+  it('ルート地点編集Sheetをcandidate編集と同じ項目順で表示する', () => {
+    const point = { id: 'main', locked: 'main', name: '河口湖', googleMapsUrl: 'https://maps.app.goo.gl/example', locationNote: '北岸', memo: '夕方' };
+    const html = renderToStaticMarkup(<PointEditSheet point={point} onClose={() => undefined} onSubmit={() => undefined} />);
+    expect(html).toContain('場所情報を編集');
+    expect(html.indexOf('場所名')).toBeLessThan(html.indexOf('GoogleマップURL'));
+    expect(html.indexOf('GoogleマップURL')).toBeLessThan(html.indexOf('場所の補足'));
+    expect(html.indexOf('場所の補足')).toBeLessThan(html.indexOf('メモ'));
+    expect(html).toContain('maxLength="60"');
+    expect(html).toContain('maxLength="300"');
+    expect(html).toContain('maxLength="200"');
+  });
+
+  it('PointCardは情報を表示し、inline editorではなく統一された編集操作を持つ', () => {
+    const html = renderToStaticMarkup(<PointCard point={{ id: 'start', locked: 'start', name: '東京駅', locationNote: '丸の内口', memo: '集合', googleMapsUrl: '' }} index={0} total={3} onEdit={() => undefined} />);
+    expect(html).toContain('丸の内口');
+    expect(html).toContain('集合');
+    expect(html).toContain('Googleマップで探す');
+    expect(html).toContain('>編集</button>');
+    expect(html).not.toContain('場所の補足</button>');
+    expect(html).not.toContain('GoogleマップURLを編集');
+  });
+
+  it('candidate編集Sheetも従来どおり場所情報を編集できる', () => {
+    const html = renderToStaticMarkup(<CandidateSheet route="A → B" mode="edit" initialName="候補" onClose={() => undefined} onSubmit={() => undefined} />);
+    expect(html).toContain('立ち寄り候補を編集');
+    expect(html).toContain('GoogleマップURL');
+    expect(html).toContain('場所の補足');
+    expect(html).toContain('メモ');
+  });
+});
 
 describe('寄り道候補探索Sheet', () => {
   afterEach(() => {

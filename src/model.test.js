@@ -1,7 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { addAiResultsToSegment, aiResultToCandidate, buildChatGptPrompt, buildCompactCandidateMemo, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate } from './model';
+import { addAiResultsToSegment, aiResultToCandidate, buildChatGptPrompt, buildCompactCandidateMemo, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate, updatePlanInfo, updatePoint } from './model';
 
 describe('plan model', () => {
+  it('ドライブ名と日付だけを更新し、地点・候補・未知の情報を維持する', () => {
+    const plan = { ...initialPlan(), date: '2026-08-24', aiContext: { version: 2 } };
+    plan.candidates['tokyo-start::kawaguchiko'] = [{ id: 'candidate', name: '候補' }];
+    const next = updatePlanInfo(plan, { title: '  新しい名前  ', date: '2026-09-01' });
+    expect(next).toMatchObject({ title: '新しい名前', date: '2026-09-01', aiContext: plan.aiContext });
+    expect(next.points).toBe(plan.points);
+    expect(next.candidates).toBe(plan.candidates);
+  });
+
+  it.each([
+    ['tokyo-start', 'start'],
+    ['kawaguchiko', 'main'],
+    ['tokyo-goal', 'goal'],
+    ['normal', undefined],
+  ])('%sの場所情報をidで更新し、identityと役割を維持する', (pointId, locked) => {
+    const plan = initialPlan();
+    if (pointId === 'normal') plan.points.splice(2, 0, { id: pointId, name: '通常地点', custom: true });
+    const original = plan.points.find((point) => point.id === pointId);
+    const next = updatePoint(plan, pointId, { name: ' 変更後 ', googleMapsUrl: ' https://maps.app.goo.gl/example ', locationNote: ' 補足 ', memo: ' メモ ' });
+    const updated = next.points.find((point) => point.id === pointId);
+    expect(updated).toMatchObject({ id: pointId, name: '変更後', googleMapsUrl: 'https://maps.app.goo.gl/example', locationNote: '補足', memo: 'メモ' });
+    expect(updated.locked).toBe(locked);
+    expect(updated.custom).toBe(original.custom);
+  });
+
+  it('地点名の変更後もidベースのsegmentとcandidateをそのまま維持する', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    plan.candidates[key] = [{ id: 'candidate', name: '既存候補' }];
+    const next = updatePoint(plan, 'tokyo-start', { name: '船橋駅', googleMapsUrl: '', locationNote: '', memo: '' });
+    expect(segmentKey(next.points[0], next.points[1])).toBe(key);
+    expect(next.candidates).toBe(plan.candidates);
+    expect(next.candidates[key]).toEqual(plan.candidates[key]);
+  });
   const aiResult = (name, overrides = {}) => ({
     resultId: `ai-${name}`,
     name,
