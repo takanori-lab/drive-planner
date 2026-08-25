@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AiCandidateResults, AiCandidateSheet, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
+import { AiCandidateResults, AiCandidateSheet, AiSearchingView, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, SearchCompanionAnimation, acquireSearchInFlight, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
 import { initialPlan } from './model';
 import { SESSION_STORAGE_KEY } from './api';
 
@@ -69,6 +69,7 @@ describe('寄り道候補探索Sheet', () => {
     expect(html).toContain('Drive Plannerのパスコード');
     expect(html).toContain('続ける');
     expect(html).not.toContain('条件を追加（任意）');
+    expect(html).not.toContain('data-testid="search-companion"');
   });
 
   it('有効なsessionがあれば認証を飛ばし、条件を閉じた探索画面を表示する', () => {
@@ -117,6 +118,30 @@ describe('寄り道候補探索Sheet', () => {
   it('認証中と候補探索中のloading文言を分ける', () => {
     expect(candidateLoadingMessage(null)).toBe('確認しています…');
     expect(candidateLoadingMessage(validSession())).toBe('候補を探しています…');
+  });
+
+  it('AI探索中の専用UIは装飾画像と読み上げ用statusを表示する', () => {
+    const html = renderToStaticMarkup(<AiSearchingView />);
+    expect(html).toContain('data-testid="search-companion"');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('寄り道候補を探しています…');
+    expect(html).not.toContain('澪');
+    expect(html).not.toContain('Mio');
+  });
+
+  it('同期的なin-flight guardは高速な2回目の探索を拒否し、解除後は再探索できる', () => {
+    const searchInFlightRef = { current: false };
+    expect(acquireSearchInFlight(searchInFlightRef)).toBe(true);
+    expect(acquireSearchInFlight(searchInFlightRef)).toBe(false);
+    searchInFlightRef.current = false;
+    expect(acquireSearchInFlight(searchInFlightRef)).toBe(true);
+  });
+
+  it('検索キャラクターは装飾要素として扱う', () => {
+    const html = renderToStaticMarkup(<SearchCompanionAnimation />);
+    expect(html).toBe('<div class="search-companion" aria-hidden="true" data-testid="search-companion"></div>');
   });
 
   it('needs_clarificationでは原因地点を断定せず詳細を折りたたむ', () => {
