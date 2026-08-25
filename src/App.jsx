@@ -128,6 +128,35 @@ export async function requestSegmentCandidates(plan, segmentIndex, extraRequest,
 
 export const candidateLoadingMessage = (session) => session ? '候補を探しています…' : '確認しています…';
 
+export function acquireSearchInFlight(searchInFlightRef) {
+  if (searchInFlightRef.current) return false;
+  searchInFlightRef.current = true;
+  return true;
+}
+
+const SEARCHING_HINTS = [
+  'ルートから外れすぎない場所を探しています',
+  'ちょっと意外な寄り道も探しています',
+  'この区間に合いそうな候補を探しています',
+];
+
+export function SearchCompanionAnimation() {
+  return <div className="search-companion" aria-hidden="true" data-testid="search-companion" />;
+}
+
+export function AiSearchingView() {
+  const [hintIndex, setHintIndex] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setHintIndex((current) => (current + 1) % SEARCHING_HINTS.length), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <div className="ai-searching-view">
+    <SearchCompanionAnimation />
+    <p className="ai-searching-title" role="status" aria-live="polite">寄り道候補を探しています…</p>
+    <p className="ai-searching-hint" aria-hidden="true">{SEARCHING_HINTS[hintIndex]}</p>
+  </div>;
+}
+
 export function AiCandidateResults({ result, selectedIndexes = [], onToggle = () => undefined }) {
   if (result?.status === 'needs_clarification') return <div className="clarification" role="status"><strong>地点の場所を特定できませんでした。</strong><p>地点の場所情報を追加して、もう一度探してください。</p><details><summary>詳細を見る</summary><p>{result.clarificationMessage}</p></details></div>;
   if (result?.status !== 'ok') return null;
@@ -157,7 +186,9 @@ export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => (
   const [session, setSession] = useState(() => readSession());
   const [result, setResult] = useState(initialResult);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchInFlightRef = useRef(false);
   const [conditionsOpen, setConditionsOpen] = useState(false);
   const [selectedIndexes, setSelectedIndexes] = useState([]);
   const [addMessage, setAddMessage] = useState('');
@@ -178,8 +209,8 @@ export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => (
 
   const authenticate = async (event) => {
     event.preventDefault();
-    if (loading) return;
-    setLoading(true);
+    if (isAuthenticating) return;
+    setIsAuthenticating(true);
     setError('');
     try {
       const created = await authenticateCandidateSession(passcode);
@@ -189,14 +220,14 @@ export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => (
       handleError(caught, true);
       setPasscode('');
     } finally {
-      setLoading(false);
+      setIsAuthenticating(false);
     }
   };
 
   const search = async (event) => {
     event.preventDefault();
-    if (loading) return;
-    setLoading(true);
+    if (!acquireSearchInFlight(searchInFlightRef)) return;
+    setIsSearching(true);
     setError('');
     setResult(null);
     setSelectedIndexes([]);
@@ -212,7 +243,8 @@ export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => (
     } catch (caught) {
       handleError(caught);
     } finally {
-      setLoading(false);
+      searchInFlightRef.current = false;
+      setIsSearching(false);
     }
   };
 
@@ -229,24 +261,23 @@ export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => (
     else setAddMessage(`${outcome.addedCount}件を候補へ追加しました。`);
   };
 
-  return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !isSearching && onClose()}>
     <section className="sheet ai-candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="ai-sheet-title">
       <div className="sheet-grip" />
-      <div className="sheet-head"><div><span className="eyebrow">DISCOVER A DETOUR</span><h2 id="ai-sheet-title">寄り道候補を探す</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
+      <div className="sheet-head"><div><span className="eyebrow">DISCOVER A DETOUR</span><h2 id="ai-sheet-title">寄り道候補を探す</h2></div><button type="button" className="close" aria-label="閉じる" disabled={isSearching} onClick={onClose}>×</button></div>
       <p className="route-context">{before.name} → {after.name}</p>
       {!session ? <form onSubmit={authenticate}>
         <p className="ai-description">候補探索機能を利用するため、Drive Plannerのパスコードを入力してください。</p>
         <label>Drive Plannerのパスコード<input autoFocus required type="password" autoComplete="current-password" value={passcode} onChange={(event) => setPasscode(event.target.value)} /></label>
-        <button className="primary submit" disabled={loading || !passcode}>{loading ? '確認しています…' : '続ける'}</button>
-      </form> : <form onSubmit={search}>
+        <button className="primary submit" disabled={isAuthenticating || !passcode}>{isAuthenticating ? '確認しています…' : '続ける'}</button>
+      </form> : isSearching ? <AiSearchingView /> : <form onSubmit={search}>
         <p className="ai-description">この区間で、車で立ち寄りやすい場所を5件探します。</p>
         <details className="search-conditions" open={conditionsOpen} onToggle={(event) => setConditionsOpen(event.currentTarget.open)}>
           <summary>条件を追加（任意）</summary>
           <label>希望する条件<textarea maxLength="300" value={extraRequest} onChange={(event) => setExtraRequest(event.target.value)} placeholder="例：景色がいい場所を多めに / 食べ物以外 / 30分以内の寄り道" /></label>
         </details>
-        <button className="primary submit" disabled={loading}>{loading ? '候補を探しています…' : '候補を探す'}</button>
+        <button className="primary submit">候補を探す</button>
       </form>}
-      {loading && <p className="ai-loading" role="status">{candidateLoadingMessage(session)}</p>}
       {error && <p className="ai-error" role="alert">{error}</p>}
       <AiCandidateResults result={result} selectedIndexes={selectedIndexes} onToggle={(index) => setSelectedIndexes((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index])} />
       {result?.status === 'ok' && <div className="ai-add-actions"><button type="button" className="primary" disabled={!selectedIndexes.length} onClick={addSelected}>選んだ候補を追加（{selectedIndexes.length}件）</button>{addMessage && <p className="ai-add-message" role="status">{addMessage}</p>}</div>}
