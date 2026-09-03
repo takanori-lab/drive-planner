@@ -15,9 +15,22 @@ describe('openrouteservice routing provider', () => {
     expect(JSON.parse(init.body)).toEqual({ coordinates: [[139.767, 35.681], [138.769, 35.498]], ...(options ? { options } : {}) });
   });
   it('Google Maps URLの座標を優先してgeocodingを省略する', async () => {
-    const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps/@35.681,139.767,15z'; target.after.googleMapsUrl = 'https://www.google.com/maps/@35.498,138.769,15z';
+    const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps?q=35.681%2C139.767'; target.after.googleMapsUrl = 'https://www.google.com/maps?query=35.498%2C138.769';
     const fetcher = vi.fn().mockResolvedValue(directions()); const result = await calculateRoute(target, 'dummy', fetcher);
     expect(fetcher).toHaveBeenCalledOnce(); expect(result).toMatchObject({ locationResolution: { before: 'google_maps_coordinates', after: 'google_maps_coordinates' } });
+  });
+  it('Google Mapsの表示中心ではなくplace名をgeocodingする', async () => {
+    const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps/place/%E6%9D%B1%E4%BA%AC%E9%A7%85/@35.0,139.0,15z';
+    const fetcher = vi.fn(async (input: URL | RequestInfo, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === ORS_DIRECTIONS_URL) return directions();
+      return new URL(url).searchParams.get('text') === '東京駅' ? geocode(139.767, 35.681) : geocode(138.769, 35.498);
+    });
+    const result = await calculateRoute(target, 'dummy', fetcher);
+    expect(fetcher.mock.calls.some(([url]) => new URL(String(url)).searchParams.get('text') === '東京駅')).toBe(true);
+    const directionsCall = fetcher.mock.calls.find(([url]) => String(url) === ORS_DIRECTIONS_URL)!;
+    expect(JSON.parse(directionsCall[1]!.body as string).coordinates[0]).toEqual([139.767, 35.681]);
+    expect(result).toMatchObject({ locationResolution: { before: 'google_maps_query_geocoding' } });
   });
   it('URLのlabelからgeocodingへfallbackする', async () => {
     const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps/place/%E6%9D%B1%E4%BA%AC%E9%A7%85';
@@ -45,16 +58,16 @@ describe('openrouteservice routing provider', () => {
     [400, false], [401, false], [429, true], [503, true],
   ])('directionsのHTTP %iをretryable=%sに分類する', async (status, retryable) => {
     const target = input();
-    target.before.googleMapsUrl = 'https://www.google.com/maps/@35.681,139.767,15z';
-    target.after.googleMapsUrl = 'https://www.google.com/maps/@35.498,138.769,15z';
+    target.before.googleMapsUrl = 'https://www.google.com/maps?q=35.681%2C139.767';
+    target.after.googleMapsUrl = 'https://www.google.com/maps?q=35.498%2C138.769';
     await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status })))).rejects.toMatchObject({
       code: 'routing_unavailable', retryable,
     });
   });
   it('ORSの429待機時間を伝播し、ヘッダーがなければ60秒にする', async () => {
     const target = input();
-    target.before.googleMapsUrl = 'https://www.google.com/maps/@35.681,139.767,15z';
-    target.after.googleMapsUrl = 'https://www.google.com/maps/@35.498,138.769,15z';
+    target.before.googleMapsUrl = 'https://www.google.com/maps?q=35.681%2C139.767';
+    target.after.googleMapsUrl = 'https://www.google.com/maps?q=35.498%2C138.769';
     await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status: 429, headers: { 'Retry-After': '120' } })))).rejects.toMatchObject({ retryAfterSeconds: 120 });
     await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status: 429 })))).rejects.toMatchObject({ retryAfterSeconds: 60 });
   });

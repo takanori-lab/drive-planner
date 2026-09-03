@@ -275,8 +275,8 @@ describe('Drive Planner Worker', () => {
     expect(JSON.stringify(googleInit)).not.toContain(env.OPENAI_API_KEY);
     expect(JSON.stringify(googleInit)).not.toContain('Authorization');
     const openAiRequest = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
-    expect(JSON.parse(openAiRequest.input).resolvedGoogleMapsContext['segment.after']).toMatchObject({
-      label: '湖畔のパン屋', latitude: 35.5, longitude: 138.7,
+    expect(JSON.parse(openAiRequest.input).resolvedGoogleMapsContext['segment.after']).toEqual({
+      label: '湖畔のパン屋', resolvedUrl: 'https://www.google.com/maps/place/%E6%B9%96%E7%95%94%E3%81%AE%E3%83%91%E3%83%B3%E5%B1%8B/@35.5,138.7,15z',
     });
     expect(openAiRequest.instructions).toContain('resolvedGoogleMapsContext');
     expect(openAiRequest.instructions).toContain('Web Searchは使用できません');

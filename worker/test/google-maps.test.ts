@@ -13,12 +13,12 @@ const input = (url = ''): SegmentCandidatesRequest => ({
 });
 
 describe('Google Maps共有URL解決', () => {
-  it('短縮URLのredirectを手動で追い、最終URLからplace名と座標を抽出する', async () => {
+  it('短縮URLのredirectを手動で追い、最終URLからplace名を抽出する', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://goo.gl/maps/next' } }))
       .mockResolvedValueOnce(new Response(null, { status: 301, headers: { Location: 'https://www.google.com/maps/place/%E6%B9%96%E7%95%94%E3%81%AE%E3%83%91%E3%83%B3%E5%B1%8B/@35.5,138.7,15z' } }));
-    await expect(resolveGoogleMapsUrl('https://maps.app.goo.gl/abc', fetcher)).resolves.toMatchObject({
-      label: '湖畔のパン屋', latitude: 35.5, longitude: 138.7,
+    await expect(resolveGoogleMapsUrl('https://maps.app.goo.gl/abc', fetcher)).resolves.toEqual({
+      label: '湖畔のパン屋', resolvedUrl: 'https://www.google.com/maps/place/%E6%B9%96%E7%95%94%E3%81%AE%E3%83%91%E3%83%B3%E5%B1%8B/@35.5,138.7,15z',
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
     for (const [, options] of fetcher.mock.calls) {
@@ -57,8 +57,15 @@ describe('Google Maps共有URL解決', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('表示中心の@座標を目的地座標として扱わない', () => {
+    expect(extractGoogleMapsPlace('https://www.google.com/maps/place/Tokyo+Station/@35.1,139.2,15z')).toMatchObject({ label: 'Tokyo Station' });
+    expect(extractGoogleMapsPlace('https://www.google.com/maps/place/Tokyo+Station/@35.1,139.2,15z')).not.toMatchObject({
+      latitude: expect.any(Number), longitude: expect.any(Number),
+    });
+  });
+
   it('範囲外の座標は採用しない', () => {
-    expect(extractGoogleMapsPlace('https://www.google.com/maps/place/test/@91,181,10z')).not.toMatchObject({ latitude: expect.any(Number), longitude: expect.any(Number) });
+    expect(extractGoogleMapsPlace('https://www.google.com/maps?q=91%2C181')).not.toMatchObject({ latitude: expect.any(Number), longitude: expect.any(Number) });
   });
 
   it('同じURLを重複fetchせず、URLがなければfetchしない', async () => {
