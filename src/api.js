@@ -57,12 +57,13 @@ export function sessionExpiredWhileSheetOpen(displayedSession, storedSession) {
 }
 
 export class WorkerApiError extends Error {
-  constructor(httpStatus, code = 'internal_error', retryable = false) {
+  constructor(httpStatus, code = 'internal_error', retryable = false, retryAfterMs) {
     super('Worker API request failed');
     this.name = 'WorkerApiError';
     this.httpStatus = httpStatus;
     this.code = code;
     this.retryable = Boolean(retryable);
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -70,7 +71,9 @@ async function parseResponse(response) {
   let body = null;
   try { body = await response.json(); } catch { /* raw responseを公開しない */ }
   if (!response.ok || body?.status === 'error') {
-    throw new WorkerApiError(response.status, body?.error?.code, body?.error?.retryable);
+    const retryAfterSeconds = Number(response.headers.get('Retry-After') ?? body?.error?.retryAfterSeconds);
+    const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0 ? retryAfterSeconds * 1000 : undefined;
+    throw new WorkerApiError(response.status, body?.error?.code, body?.error?.retryable, retryAfterMs);
   }
   return body;
 }

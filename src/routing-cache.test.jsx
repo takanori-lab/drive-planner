@@ -28,6 +28,12 @@ it('一時的なroutingエラーだけを上限付きで自動再試行する', 
   expect(sleep).toHaveBeenNthCalledWith(1, 1000);
   expect(sleep).toHaveBeenNthCalledWith(2, 3000);
 
+  const rateLimited = vi.fn()
+    .mockRejectedValueOnce(new WorkerApiError(429, 'rate_limited', true, 60_000))
+    .mockResolvedValueOnce({ status: 'ok' });
+  await expect(requestRouteWithRetry(rateLimited, sleep)).resolves.toMatchObject({ status: 'ok' });
+  expect(sleep).toHaveBeenLastCalledWith(60_000);
+
   const permanent = vi.fn().mockRejectedValue(new WorkerApiError(400, 'invalid_request', false));
   await expect(requestRouteWithRetry(permanent, sleep)).resolves.toEqual({ status: 'error' });
   expect(permanent).toHaveBeenCalledOnce();

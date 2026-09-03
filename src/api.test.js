@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAiRequestBody, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { buildAiRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
 
 const plan = {
   title: 'テスト旅行',
@@ -74,4 +74,11 @@ it('HTTP error contractをraw messageなしで安全にparseする', async () =>
   await expect(createSession('x', { fetchImpl })).rejects.toEqual(expect.objectContaining({ code: 'rate_limited', httpStatus: 429, retryable: true }));
   await expect(createSession('x', { fetchImpl })).rejects.not.toEqual(expect.objectContaining({ message: 'raw' }));
   expect(WorkerApiError).toBeDefined();
+});
+
+it('429のRetry-Afterを再試行待機時間として保持する', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'error', error: { code: 'rate_limited', retryable: true } }), {
+    status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
+  }));
+  await expect(fetchSegmentRoute({}, {}, 'recommended', { fetchImpl })).rejects.toMatchObject({ retryAfterMs: 60_000 });
 });

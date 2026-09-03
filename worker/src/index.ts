@@ -13,6 +13,7 @@ const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const SHARED_AI_RATE_LIMIT_KEY = 'drive-planner-shared-group-v1';
 const SHARED_ROUTING_RATE_LIMIT_KEY = 'drive-planner-routing-shared-group-v1';
+const RATE_LIMIT_PERIOD_SECONDS = 60;
 
 export interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -41,6 +42,7 @@ function corsHeaders(request: Request): Headers {
   if (origin) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Vary', 'Origin');
+    headers.set('Access-Control-Expose-Headers', 'Retry-After');
   }
   return headers;
 }
@@ -76,7 +78,7 @@ function preflight(request: Request): Response {
 }
 
 function rateLimited(): ApiError {
-  return new ApiError(429, 'rate_limited', 'リクエスト回数が上限に達しました。しばらく待ってからお試しください。', true);
+  return new ApiError(429, 'rate_limited', 'リクエスト回数が上限に達しました。しばらく待ってからお試しください。', true, RATE_LIMIT_PERIOD_SECONDS);
 }
 
 function requireBearer(request: Request): string {

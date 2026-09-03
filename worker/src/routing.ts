@@ -11,6 +11,11 @@ export interface RoutingInput { requestId: string; condition: RouteCondition; be
 export interface ResolvedLocation { longitude: number; latitude: number; method: ResolutionMethod; confidence: 'exact' | 'approximate' }
 export interface RoutingResult { status: 'ok'; provider: 'openrouteservice'; routingPolicyVersion: string; condition: RouteCondition; distanceMeters: number; durationSeconds: number; locationResolution: { before: ResolutionMethod; after: ResolutionMethod }; confidence: 'exact' | 'approximate' }
 
+function upstreamUnavailable(response: Response, message: string): ApiError {
+  const retryable = response.status === 429 || response.status >= 500;
+  return new ApiError(502, 'routing_unavailable', message, retryable);
+}
+
 async function withTimeout(fetcher: typeof fetch, url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
   try { return await fetcher(url, { ...init, signal: controller.signal }); }
@@ -30,7 +35,7 @@ export async function resolveLocation(place: PlaceInput, apiKey: string, fetcher
   if (!query) return null;
   const url = new URL(ORS_GEOCODE_URL); url.searchParams.set('text', query); url.searchParams.set('size', '1'); url.searchParams.set('boundary.country', 'JP');
   const response = await withTimeout(fetcher, url.href, { headers: { Authorization: apiKey } }, timeoutMs);
-  if (!response.ok) throw new ApiError(502, 'routing_unavailable', '地点を特定できませんでした。', true);
+  if (!response.ok) throw upstreamUnavailable(response, '地点を特定できませんでした。');
   const json = await response.json() as { features?: Array<{ geometry?: { coordinates?: number[] }; properties?: { confidence?: number } }> };
   const feature = json.features?.[0]; const coordinates = feature?.geometry?.coordinates;
   if (!coordinates || coordinates.length < 2 || !coordinates.every(Number.isFinite)) return null;
@@ -42,7 +47,7 @@ export async function calculateRoute(input: RoutingInput, apiKey: string, fetche
   if (!before || !after) return { status: 'unresolved', provider: 'openrouteservice', routingPolicyVersion: ROUTING_POLICY_VERSION, unresolved: [...(!before ? ['before' as const] : []), ...(!after ? ['after' as const] : [])] };
   const options = input.condition === 'local_roads' ? { avoid_features: ['highways'] } : undefined;
   const response = await withTimeout(fetcher, ORS_DIRECTIONS_URL, { method: 'POST', headers: { Authorization: apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ coordinates: [[before.longitude, before.latitude], [after.longitude, after.latitude]], ...(options ? { options } : {}) }) }, timeoutMs);
-  if (!response.ok) throw new ApiError(502, 'routing_unavailable', '経路を計算できませんでした。', true);
+  if (!response.ok) throw upstreamUnavailable(response, '経路を計算できませんでした。');
   const json = await response.json() as { routes?: Array<{ summary?: { distance?: number; duration?: number } }> }; const summary = json.routes?.[0]?.summary;
   if (!summary || !Number.isFinite(summary.distance) || !Number.isFinite(summary.duration)) throw new ApiError(502, 'routing_invalid_response', '経路を計算できませんでした。', true);
   return { status: 'ok', provider: 'openrouteservice', routingPolicyVersion: ROUTING_POLICY_VERSION, condition: input.condition,

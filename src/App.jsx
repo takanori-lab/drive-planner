@@ -106,7 +106,9 @@ export async function requestRouteWithRetry(request, sleep = (delay) => new Prom
   for (let attempt = 0; ; attempt += 1) {
     try { return await request(); } catch (error) {
       if (!isRetryableRouteError(error) || attempt >= ROUTE_RETRY_DELAYS_MS.length) return { status: 'error' };
-      await sleep(ROUTE_RETRY_DELAYS_MS[attempt]);
+      await sleep(error.httpStatus === 429 && Number.isFinite(error.retryAfterMs)
+        ? Math.max(error.retryAfterMs, ROUTE_RETRY_DELAYS_MS[attempt])
+        : ROUTE_RETRY_DELAYS_MS[attempt]);
     }
   }
 }
@@ -454,7 +456,7 @@ export default function App() {
   const totalRoute = routeTotal(plan.points, routeResults);
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
-    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="hero-actions"><button className="edit-drive" onClick={() => setIsEditingPlan(true)}>ドライブ情報を編集</button><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button></div><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div><div className="route-summary"><label>全体の経路 <select value={plan.routingCondition} onChange={(event) => setPlan((old) => setPlanRoutingCondition(old, event.target.value))}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label>{totalRoute.completed > 0 && <strong>{totalRoute.complete ? '合計' : `計算済み ${totalRoute.completed}/${totalRoute.total}区間`} 約{Math.round(totalRoute.distanceMeters / 1000)} km ・ 約{formatDuration(totalRoute.durationSeconds)}</strong>}<small>距離・時間はリアルタイム交通を含まない計画用の目安です。</small></div></section>
+    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="hero-actions"><button className="edit-drive" onClick={() => setIsEditingPlan(true)}>ドライブ情報を編集</button><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button></div><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div><div className="route-summary"><label>全体の経路 <select value={plan.routingCondition} onChange={(event) => setPlan((old) => setPlanRoutingCondition(old, event.target.value))}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label>{totalRoute.completed > 0 && <strong>{totalRoute.complete ? '合計' : `計算済み ${totalRoute.completed}/${totalRoute.total}区間`} 約{formatDistance(totalRoute.distanceMeters)} ・ 約{formatDuration(totalRoute.durationSeconds)}</strong>}<small>距離・時間はリアルタイム交通を含まない計画用の目安です。</small></div></section>
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
           <div className="route-item route-endpoint">

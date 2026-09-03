@@ -97,7 +97,9 @@ describe('Drive Planner Worker', () => {
     const fetcher = vi.fn();
     const body = { requestId: 'route-request', condition: 'local_roads', before: fixture().segment.before, after: fixture().segment.after };
     const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
-    expect(response.status).toBe(429); expect(await response.json()).toMatchObject({ error: { code: 'rate_limited' } });
+    expect(response.status).toBe(429); expect(response.headers.get('Retry-After')).toBe('60');
+    expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Retry-After');
+    expect(await response.json()).toMatchObject({ error: { code: 'rate_limited', retryAfterSeconds: 60 } });
     expect(fetcher).not.toHaveBeenCalled();
     expect((env.AI_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
   });

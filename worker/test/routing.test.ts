@@ -41,4 +41,19 @@ describe('openrouteservice routing provider', () => {
     const timeout = vi.fn((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(Object.assign(new Error(), { name: 'AbortError' })))));
     await expect(calculateRoute(input(), 'dummy', timeout as any, 1)).rejects.toMatchObject({ code: 'routing_timeout' });
   });
+  it.each([
+    [400, false], [401, false], [429, true], [503, true],
+  ])('directionsのHTTP %iをretryable=%sに分類する', async (status, retryable) => {
+    const target = input();
+    target.before.googleMapsUrl = 'https://www.google.com/maps/@35.681,139.767,15z';
+    target.after.googleMapsUrl = 'https://www.google.com/maps/@35.498,138.769,15z';
+    await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status })))).rejects.toMatchObject({
+      code: 'routing_unavailable', retryable,
+    });
+  });
+  it.each([[400, false], [503, true]])('geocodingのHTTP %iをretryable=%sに分類する', async (status, retryable) => {
+    await expect(calculateRoute(input(), 'dummy', vi.fn().mockResolvedValue(new Response('', { status })))).rejects.toMatchObject({
+      code: 'routing_unavailable', retryable,
+    });
+  });
 });

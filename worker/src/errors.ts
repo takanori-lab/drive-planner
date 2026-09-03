@@ -22,18 +22,22 @@ export class ApiError extends Error {
     public readonly code: ErrorCode,
     message: string,
     public readonly retryable = false,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
   }
 }
 
 export function errorResponse(error: ApiError, headers: HeadersInit = {}): Response {
+  const responseHeaders = new Headers(headers);
+  if (error.retryAfterSeconds !== undefined) responseHeaders.set('Retry-After', String(error.retryAfterSeconds));
   return Response.json({
     status: 'error',
     error: {
       code: error.code,
       message: error.message,
       retryable: error.retryable,
+      ...(error.retryAfterSeconds !== undefined ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
     },
-  }, { status: error.status, headers });
+  }, { status: error.status, headers: responseHeaders });
 }
