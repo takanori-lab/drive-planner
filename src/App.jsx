@@ -98,6 +98,20 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
 const formatDuration = (seconds) => { const minutes = Math.round(seconds / 60); const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours}時間${rest ? `${rest}分` : ''}` : `${rest}分`; };
 const formatRoute = (result) => `${Math.round(result.distanceMeters / 1000)} km ・ 約${formatDuration(result.durationSeconds)}`;
 
+export function cachedRouteRequest(cache, identity, request) {
+  const cached = cache.get(identity);
+  if (cached) return cached;
+  const pending = request().then((result) => {
+    if (result?.status === 'error') cache.delete(identity);
+    return result;
+  }, (error) => {
+    cache.delete(identity);
+    throw error;
+  });
+  cache.set(identity, pending);
+  return pending;
+}
+
 function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
@@ -396,8 +410,7 @@ export default function App() {
       const before = plan.points[index], after = plan.points[index + 1], key = segmentKey(before, after);
       const condition = routingConditionForSegment(plan, before, after);
       const identity = JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]);
-      let pending = routeCache.current.get(identity);
-      if (!pending) { pending = fetchSegmentRoute(before, after, condition).catch(() => ({ status: 'error' })); routeCache.current.set(identity, pending); }
+      const pending = cachedRouteRequest(routeCache.current, identity, () => fetchSegmentRoute(before, after, condition).catch(() => ({ status: 'error' })));
       setRouteResults((old) => ({ ...old, [key]: { status: 'loading' } }));
       pending.then((result) => active && setRouteResults((old) => ({ ...old, [key]: result })));
     }

@@ -4,7 +4,7 @@ import type { PlaceInput } from './validation';
 
 export const ROUTING_POLICY_VERSION = 'ors-v1';
 export const ORS_DIRECTIONS_URL = 'https://api.heigit.org/openrouteservice/v2/directions/driving-car/json';
-export const ORS_GEOCODE_URL = 'https://api.heigit.org/geocoding/v1/search';
+export const ORS_GEOCODE_URL = 'https://api.heigit.org/pelias/v1/search';
 export type RouteCondition = 'recommended' | 'local_roads';
 export type ResolutionMethod = 'google_maps_coordinates' | 'google_maps_query_geocoding' | 'place_geocoding';
 export interface RoutingInput { requestId: string; condition: RouteCondition; before: PlaceInput; after: PlaceInput }

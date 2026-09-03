@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { calculateRoute, ORS_DIRECTIONS_URL, ORS_GEOCODE_URL } from '../src/routing';
+import { calculateRoute, ORS_DIRECTIONS_URL } from '../src/routing';
 
 const place = (name: string, googleMapsUrl = '') => ({ name, googleMapsUrl, locationNote: '', memo: '' });
 const input = (condition: 'recommended'|'local_roads' = 'recommended') => ({ requestId: 'route-1', condition, before: place('東京駅'), after: place('河口湖駅') });
@@ -22,7 +22,16 @@ describe('openrouteservice routing provider', () => {
   it('URLのlabelからgeocodingへfallbackする', async () => {
     const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps/place/%E6%9D%B1%E4%BA%AC%E9%A7%85';
     const fetcher = vi.fn().mockResolvedValueOnce(geocode(139, 35)).mockResolvedValueOnce(geocode(138, 35)).mockResolvedValueOnce(directions());
-    const result = await calculateRoute(target, 'dummy', fetcher); expect(fetcher.mock.calls[0][0]).toContain(ORS_GEOCODE_URL); expect(result).toMatchObject({ locationResolution: { before: 'google_maps_query_geocoding' } });
+    const result = await calculateRoute(target, 'dummy', fetcher);
+    const requestedUrls = fetcher.mock.calls.slice(0, 2).map(([url]) => new URL(url));
+    const geocodeUrl = requestedUrls.find((url) => url.searchParams.get('text') === '東京駅');
+    expect(geocodeUrl).toBeDefined();
+    expect(geocodeUrl!.origin).toBe('https://api.heigit.org');
+    expect(geocodeUrl!.pathname).toBe('/pelias/v1/search');
+    expect(geocodeUrl!.searchParams.get('text')).toBe('東京駅');
+    expect(geocodeUrl!.searchParams.get('size')).toBe('1');
+    expect(geocodeUrl!.searchParams.get('boundary.country')).toBe('JP');
+    expect(result).toMatchObject({ locationResolution: { before: 'google_maps_query_geocoding' } });
   });
   it('地点を解決できなければrouteを生成しない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => Response.json({ features: [] })); expect(await calculateRoute(input(), 'dummy', fetcher)).toMatchObject({ status: 'unresolved', unresolved: ['before', 'after'] });

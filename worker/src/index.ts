@@ -12,6 +12,7 @@ const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const SHARED_AI_RATE_LIMIT_KEY = 'drive-planner-shared-group-v1';
+const SHARED_ROUTING_RATE_LIMIT_KEY = 'drive-planner-routing-shared-group-v1';
 
 export interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -26,6 +27,7 @@ export interface Env {
   AI_LOGS_DB: D1Database;
   SESSION_RATE_LIMITER: RateLimiter;
   AI_RATE_LIMITER: RateLimiter;
+  ROUTING_RATE_LIMITER: RateLimiter;
 }
 
 function allowedOrigin(origin: string | null): string | null {
@@ -142,6 +144,9 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
     if (url.pathname === '/v1/routing/segment') {
       if (request.method === 'OPTIONS') return preflight(request);
       if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
+      if (!allowedOrigin(request.headers.get('Origin'))) throw new ApiError(403, 'invalid_request', '許可されていないOriginです。');
+      if (!env?.ROUTING_RATE_LIMITER) throw new Error('Worker configuration is incomplete');
+      if (!(await env.ROUTING_RATE_LIMITER.limit({ key: SHARED_ROUTING_RATE_LIMIT_KEY })).success) throw rateLimited();
       const input = validateRoutingRequest(await parseBody(request));
       if (!env?.ORS_API_KEY) throw new ApiError(500, 'routing_not_configured', '経路計算を利用できません。');
       let result;
