@@ -69,6 +69,21 @@ it('unmount時に中止済みrequestをcacheへ残さない', () => {
   expect(controllers.size).toBe(0);
 });
 
+it('古いrequestの完了時に同じidentityの新しいcacheを削除しない', async () => {
+  let finishOld;
+  const oldRequest = new Promise((resolve) => { finishOld = resolve; });
+  const cache = new Map();
+  const oldPending = cachedRouteRequest(cache, 'segment', () => oldRequest);
+  cache.clear();
+  const newPending = cachedRouteRequest(cache, 'segment', async () => ({ status: 'ok', distanceMeters: 2000 }));
+
+  finishOld({ status: 'error', aborted: true });
+  await oldPending;
+
+  expect(cache.get('segment')).toBe(newPending);
+  await expect(newPending).resolves.toMatchObject({ status: 'ok' });
+});
+
 it('短い距離と時間をゼロに丸めず表示する', () => {
   expect(formatDistance(499)).toBe('499 m');
   expect(formatDistance(1250)).toBe('1.3 km');

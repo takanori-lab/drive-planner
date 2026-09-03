@@ -128,10 +128,10 @@ export function cachedRouteRequest(cache, identity, request) {
   const cached = cache.get(identity);
   if (cached) return cached;
   const pending = request().then((result) => {
-    if (result?.status === 'error') cache.delete(identity);
+    if (result?.status === 'error' && cache.get(identity) === pending) cache.delete(identity);
     return result;
   }, (error) => {
-    cache.delete(identity);
+    if (cache.get(identity) === pending) cache.delete(identity);
     throw error;
   });
   cache.set(identity, pending);
