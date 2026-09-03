@@ -51,6 +51,13 @@ describe('openrouteservice routing provider', () => {
       code: 'routing_unavailable', retryable,
     });
   });
+  it('ORSの429待機時間を伝播し、ヘッダーがなければ60秒にする', async () => {
+    const target = input();
+    target.before.googleMapsUrl = 'https://www.google.com/maps/@35.681,139.767,15z';
+    target.after.googleMapsUrl = 'https://www.google.com/maps/@35.498,138.769,15z';
+    await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status: 429, headers: { 'Retry-After': '120' } })))).rejects.toMatchObject({ retryAfterSeconds: 120 });
+    await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status: 429 })))).rejects.toMatchObject({ retryAfterSeconds: 60 });
+  });
   it.each([[400, false], [503, true]])('geocodingのHTTP %iをretryable=%sに分類する', async (status, retryable) => {
     await expect(calculateRoute(input(), 'dummy', vi.fn().mockResolvedValue(new Response('', { status })))).rejects.toMatchObject({
       code: 'routing_unavailable', retryable,

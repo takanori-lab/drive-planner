@@ -11,9 +11,19 @@ export interface RoutingInput { requestId: string; condition: RouteCondition; be
 export interface ResolvedLocation { longitude: number; latitude: number; method: ResolutionMethod; confidence: 'exact' | 'approximate' }
 export interface RoutingResult { status: 'ok'; provider: 'openrouteservice'; routingPolicyVersion: string; condition: RouteCondition; distanceMeters: number; durationSeconds: number; locationResolution: { before: ResolutionMethod; after: ResolutionMethod }; confidence: 'exact' | 'approximate' }
 
+function retryAfterSeconds(response: Response): number | undefined {
+  if (response.status !== 429) return undefined;
+  const value = response.headers.get('Retry-After');
+  const seconds = Number(value);
+  if (value && Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = value ? Date.parse(value) : NaN;
+  if (Number.isFinite(date)) return Math.max(0, Math.ceil((date - Date.now()) / 1000));
+  return 60;
+}
+
 function upstreamUnavailable(response: Response, message: string): ApiError {
   const retryable = response.status === 429 || response.status >= 500;
-  return new ApiError(502, 'routing_unavailable', message, retryable);
+  return new ApiError(502, 'routing_unavailable', message, retryable, retryAfterSeconds(response));
 }
 
 async function withTimeout(fetcher: typeof fetch, url: string, init: RequestInit, timeoutMs: number): Promise<Response> {

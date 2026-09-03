@@ -102,13 +102,24 @@ export const formatRoute = (result) => `${formatDistance(result.distanceMeters)}
 const ROUTE_RETRY_DELAYS_MS = [1000, 3000];
 export const isRetryableRouteError = (error) => error instanceof WorkerApiError
   && (error.retryable || [429, 503, 504].includes(error.httpStatus));
-export async function requestRouteWithRetry(request, sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))) {
+const abortableSleep = (delay, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+  const id = setTimeout(resolve, delay);
+  signal?.addEventListener('abort', () => { clearTimeout(id); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+});
+export async function requestRouteWithRetry(request, sleep = abortableSleep, signal) {
   for (let attempt = 0; ; attempt += 1) {
     try { return await request(); } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError') return { status: 'error', aborted: true };
       if (!isRetryableRouteError(error) || attempt >= ROUTE_RETRY_DELAYS_MS.length) return { status: 'error' };
-      await sleep(error.httpStatus === 429 && Number.isFinite(error.retryAfterMs)
+      const delay = Number.isFinite(error.retryAfterMs)
         ? Math.max(error.retryAfterMs, ROUTE_RETRY_DELAYS_MS[attempt])
-        : ROUTE_RETRY_DELAYS_MS[attempt]);
+        : ROUTE_RETRY_DELAYS_MS[attempt];
+      try { await (signal ? sleep(delay, signal) : sleep(delay)); }
+      catch (sleepError) {
+        if (signal?.aborted || sleepError?.name === 'AbortError') return { status: 'error', aborted: true };
+        throw sleepError;
+      }
     }
   }
 }
@@ -414,23 +425,38 @@ function formatPlanDate(date) {
 
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
-  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(new Map());
+  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
   useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
   useEffect(() => {
     let active = true;
+    const activeIdentities = new Set();
+    for (let index = 0; index < plan.points.length - 1; index += 1) {
+      const before = plan.points[index], after = plan.points[index + 1];
+      const condition = routingConditionForSegment(plan, before, after);
+      activeIdentities.add(JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]));
+    }
+    for (const [identity, controller] of routeControllers.current) {
+      if (!activeIdentities.has(identity)) { controller.abort(); routeControllers.current.delete(identity); routeCache.current.delete(identity); }
+    }
     for (let index = 0; index < plan.points.length - 1; index += 1) {
       const before = plan.points[index], after = plan.points[index + 1], key = segmentKey(before, after);
       const condition = routingConditionForSegment(plan, before, after);
       const identity = JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]);
-      const pending = cachedRouteRequest(routeCache.current, identity, () => requestRouteWithRetry(() => fetchSegmentRoute(before, after, condition)));
+      const pending = cachedRouteRequest(routeCache.current, identity, () => {
+        const controller = new AbortController();
+        routeControllers.current.set(identity, controller);
+        return requestRouteWithRetry(() => fetchSegmentRoute(before, after, condition, { signal: controller.signal }), undefined, controller.signal)
+          .finally(() => { if (routeControllers.current.get(identity) === controller) routeControllers.current.delete(identity); });
+      });
       setRouteResults((old) => ({ ...old, [key]: { status: 'loading' } }));
       pending.then((result) => active && setRouteResults((old) => ({ ...old, [key]: result })));
     }
     return () => { active = false; };
   }, [plan.points, plan.routingCondition, plan.segmentRoutingConditions]);
+  useEffect(() => () => { for (const controller of routeControllers.current.values()) controller.abort(); }, []);
   const reset = () => { if (window.confirm('現在のドライブ内容を削除して、サンプルプランに戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
   const submitNewPlan = (values) => {
     if (!window.confirm('現在のドライブ内容を新しいドライブに置き換えます。よろしいですか？')) return;

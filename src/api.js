@@ -100,8 +100,8 @@ export function buildRoutingRequestBody(before, after, condition, createRequestI
   return { requestId: createRequestId(), condition, before: placeForRequest(before), after: placeForRequest(after) };
 }
 
-export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL } = {}) {
+export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL, signal } = {}) {
   const response = await fetchImpl(`${baseUrl}/v1/routing/segment`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRoutingRequestBody(before, after, condition)) });
+    body: JSON.stringify(buildRoutingRequestBody(before, after, condition)), signal });
   return parseResponse(response);
 }

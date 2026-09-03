@@ -34,9 +34,27 @@ it('一時的なroutingエラーだけを上限付きで自動再試行する', 
   await expect(requestRouteWithRetry(rateLimited, sleep)).resolves.toMatchObject({ status: 'ok' });
   expect(sleep).toHaveBeenLastCalledWith(60_000);
 
+  const upstreamRateLimited = vi.fn()
+    .mockRejectedValueOnce(new WorkerApiError(502, 'routing_unavailable', true, 60_000))
+    .mockResolvedValueOnce({ status: 'ok' });
+  await expect(requestRouteWithRetry(upstreamRateLimited, sleep)).resolves.toMatchObject({ status: 'ok' });
+  expect(sleep).toHaveBeenLastCalledWith(60_000);
+
   const permanent = vi.fn().mockRejectedValue(new WorkerApiError(400, 'invalid_request', false));
   await expect(requestRouteWithRetry(permanent, sleep)).resolves.toEqual({ status: 'error' });
   expect(permanent).toHaveBeenCalledOnce();
+});
+
+it('中止された待機後は古いルートを再試行しない', async () => {
+  const controller = new AbortController();
+  const request = vi.fn().mockRejectedValue(new WorkerApiError(502, 'routing_unavailable', true, 60_000));
+  const sleep = vi.fn((_delay, signal) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+  }));
+  const pending = requestRouteWithRetry(request, sleep, controller.signal);
+  controller.abort();
+  await expect(pending).resolves.toMatchObject({ status: 'error', aborted: true });
+  expect(request).toHaveBeenCalledOnce();
 });
 
 it('短い距離と時間をゼロに丸めず表示する', () => {
