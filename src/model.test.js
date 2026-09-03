@@ -431,6 +431,25 @@ describe('plan model', () => {
     expect(removed.segmentRoutingConditions).toEqual({ [key]: 'local_roads' });
   });
 
+  it('全体設定と一致する有効な区間条件を結合後も引き継ぐ', () => {
+    const plan = initialPlan();
+    const before = plan.points[0]; const after = plan.points[1];
+    const key = segmentKey(before, after);
+    plan.candidates[key] = [{ id: 'falls', name: '田原の滝', locationNote: '', memo: '' }];
+    plan.segmentRoutingConditions[key] = 'local_roads';
+
+    const inserted = insertCandidate(plan, 0, 'falls');
+    const withMatchingDefault = {
+      ...inserted,
+      routingCondition: 'local_roads',
+      segmentRoutingConditions: { ...inserted.segmentRoutingConditions },
+    };
+    delete withMatchingDefault.segmentRoutingConditions[`falls::${after.id}`];
+
+    const removed = removePoint(withMatchingDefault, 1);
+    expect(removed.segmentRoutingConditions).toEqual({ [key]: 'local_roads' });
+  });
+
   it('updates candidate locationNote without changing its id or segment', () => {
     const plan = initialPlan();
     const key = segmentKey(plan.points[0], plan.points[1]);

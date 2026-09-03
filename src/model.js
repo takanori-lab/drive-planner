@@ -357,10 +357,12 @@ export function removePoint(plan, pointIndex) {
   delete candidates[rightKey];
   candidates[segmentKey(before, after)] = merged;
   const segmentRoutingConditions = { ...(plan.segmentRoutingConditions || {}) };
-  const leftCondition = segmentRoutingConditions[leftKey];
-  const rightCondition = segmentRoutingConditions[rightKey];
+  const hasLeftOverride = Object.hasOwn(segmentRoutingConditions, leftKey);
+  const hasRightOverride = Object.hasOwn(segmentRoutingConditions, rightKey);
+  const leftCondition = routingConditionForSegment(plan, before, point);
+  const rightCondition = routingConditionForSegment(plan, point, after);
   delete segmentRoutingConditions[leftKey]; delete segmentRoutingConditions[rightKey];
-  if (leftCondition && leftCondition === rightCondition) {
+  if ((hasLeftOverride || hasRightOverride) && leftCondition === rightCondition) {
     segmentRoutingConditions[segmentKey(before, after)] = leftCondition;
   }
   return { ...plan, points: plan.points.filter((_, index) => index !== pointIndex), candidates, segmentRoutingConditions };
