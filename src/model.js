@@ -1,4 +1,6 @@
 export const STORAGE_KEY = 'drive-planner:v1';
+export const ROUTE_CONDITION_RECOMMENDED = 'recommended';
+export const ROUTE_CONDITION_LOCAL_ROADS = 'local_roads';
 
 export const initialPlan = () => ({
   title: '東京発・河口湖ドライブ',
@@ -8,9 +10,42 @@ export const initialPlan = () => ({
     { id: 'tokyo-goal', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', locked: 'goal' },
   ],
   candidates: {},
+  routingCondition: ROUTE_CONDITION_RECOMMENDED,
+  segmentRoutingConditions: {},
 });
 
 export const segmentKey = (a, b) => `${a.id}::${b.id}`;
+export const routingConditionForSegment = (plan, before, after) =>
+  plan.segmentRoutingConditions?.[segmentKey(before, after)] || plan.routingCondition || ROUTE_CONDITION_RECOMMENDED;
+
+export function normalizePlanRouting(plan) {
+  return { ...plan,
+    routingCondition: [ROUTE_CONDITION_RECOMMENDED, ROUTE_CONDITION_LOCAL_ROADS].includes(plan?.routingCondition)
+      ? plan.routingCondition : ROUTE_CONDITION_RECOMMENDED,
+    segmentRoutingConditions: plan?.segmentRoutingConditions && typeof plan.segmentRoutingConditions === 'object'
+      ? plan.segmentRoutingConditions : {},
+  };
+}
+
+export function setPlanRoutingCondition(plan, condition) {
+  return { ...plan, routingCondition: condition };
+}
+
+export function setSegmentRoutingCondition(plan, before, after, condition) {
+  const key = segmentKey(before, after);
+  const overrides = { ...(plan.segmentRoutingConditions || {}) };
+  if (condition === (plan.routingCondition || ROUTE_CONDITION_RECOMMENDED)) delete overrides[key];
+  else overrides[key] = condition;
+  return { ...plan, segmentRoutingConditions: overrides };
+}
+
+export function routeTotal(points, results) {
+  const segments = points.slice(0, -1).map((point, index) => results[segmentKey(point, points[index + 1])]);
+  const completed = segments.filter((result) => result?.status === 'ok');
+  return { complete: segments.length > 0 && completed.length === segments.length, completed: completed.length,
+    total: segments.length, distanceMeters: completed.reduce((sum, value) => sum + value.distanceMeters, 0),
+    durationSeconds: completed.reduce((sum, value) => sum + value.durationSeconds, 0) };
+}
 export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const compactText = (value) => typeof value === 'string' ? value.trim() : '';
@@ -123,14 +158,14 @@ function normalizePlaceMapsUrl(place) {
 }
 
 export function normalizePlanMapsUrls(plan) {
-  return {
+  return normalizePlanRouting({
     ...plan,
     points: (plan.points || []).map(normalizePlaceMapsUrl),
     candidates: Object.fromEntries(Object.entries(plan.candidates || {}).map(([key, candidates]) => [
       key,
       candidates.map(normalizePlaceMapsUrl),
     ])),
-  };
+  });
 }
 
 function formatJapaneseDate(date) {
@@ -218,6 +253,8 @@ export function createPlan({ title, date, startName, mainName, goalName }) {
       { id: `${planId}-goal`, name: goalName, googleMapsUrl: '', locationNote: '', memo: '', locked: 'goal' },
     ],
     candidates: {},
+    routingCondition: ROUTE_CONDITION_RECOMMENDED,
+    segmentRoutingConditions: {},
   };
 }
 
@@ -310,7 +347,9 @@ export function removePoint(plan, pointIndex) {
   delete candidates[leftKey];
   delete candidates[rightKey];
   candidates[segmentKey(before, after)] = merged;
-  return { ...plan, points: plan.points.filter((_, index) => index !== pointIndex), candidates };
+  const segmentRoutingConditions = { ...(plan.segmentRoutingConditions || {}) };
+  delete segmentRoutingConditions[leftKey]; delete segmentRoutingConditions[rightKey];
+  return { ...plan, points: plan.points.filter((_, index) => index !== pointIndex), candidates, segmentRoutingConditions };
 }
 
 export function reorderPoint(plan, from, to) {
@@ -329,5 +368,7 @@ export function reorderPoint(plan, from, to) {
     const oldEntry = Object.entries(plan.candidates).find(([key]) => key.startsWith(`${before.id}::`));
     if (oldEntry?.[1]?.length) candidates[segmentKey(before, after)] = oldEntry[1];
   }
-  return { ...plan, points, candidates };
+  const validKeys = new Set(points.slice(0, -1).map((before, index) => segmentKey(before, points[index + 1])));
+  const segmentRoutingConditions = Object.fromEntries(Object.entries(plan.segmentRoutingConditions || {}).filter(([key]) => validKeys.has(key)));
+  return { ...plan, points, candidates, segmentRoutingConditions };
 }

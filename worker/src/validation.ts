@@ -17,6 +17,14 @@ export interface SegmentCandidatesRequest {
   existingCandidates: Array<{ name: string; locationNote: string }>;
   preferences: { freeText: string; useWebSearch: boolean };
 }
+export interface RoutingRequest { requestId: string; condition: 'recommended' | 'local_roads'; before: PlaceInput; after: PlaceInput }
+
+export function validateRoutingRequest(value: unknown): RoutingRequest {
+  const root = object(value, 'body'); exactKeys(root, ['requestId', 'condition', 'before', 'after'], 'body');
+  const condition = string(root.condition, 'condition', 20);
+  if (condition !== 'recommended' && condition !== 'local_roads') invalid('condition は recommended または local_roads を指定してください。');
+  return { requestId: string(root.requestId, 'requestId', 100), condition, before: place(root.before, 'before'), after: place(root.after, 'after') };
+}
 
 function invalid(detail: string): never {
   throw new ApiError(400, 'invalid_request', `リクエスト内容を確認してください。${detail}`);

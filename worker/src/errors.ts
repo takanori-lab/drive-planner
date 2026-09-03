@@ -10,6 +10,10 @@ export type ErrorCode =
   | 'ai_unavailable'
   | 'ai_timeout'
   | 'ai_invalid_response'
+  | 'routing_not_configured'
+  | 'routing_timeout'
+  | 'routing_unavailable'
+  | 'routing_invalid_response'
   | 'internal_error';
 
 export class ApiError extends Error {

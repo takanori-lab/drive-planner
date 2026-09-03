@@ -1,10 +1,12 @@
 import { ApiError, errorResponse } from './errors';
-import { MAX_BODY_BYTES, validateSegmentCandidatesRequest } from './validation';
+import { MAX_BODY_BYTES, validateRoutingRequest, validateSegmentCandidatesRequest } from './validation';
 import { createSessionToken, passcodeMatches, verifySessionToken } from './auth';
 import { generateCandidates } from './openai';
 import { resolveRequestGoogleMaps } from './google-maps';
 import { exportAiLogs, saveAiGenerationLog, type D1Database } from './ai-logs';
 import { ADMIN_PAGE } from './admin-page';
+import { calculateRoute } from './routing';
+import { saveRoutingLog } from './routing-logs';
 
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
@@ -19,6 +21,7 @@ export interface Env {
   DRIVE_PLANNER_PASSCODE: string;
   SESSION_SIGNING_KEY: string;
   OPENAI_API_KEY: string;
+  ORS_API_KEY?: string;
   AI_LOG_EXPORT_KEY: string;
   AI_LOGS_DB: D1Database;
   SESSION_RATE_LIMITER: RateLimiter;
@@ -134,6 +137,22 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       if (!(await passcodeMatches(passcode, env.DRIVE_PLANNER_PASSCODE))) throw new ApiError(401, 'unauthorized', '認証に失敗しました。');
       const session = await createSessionToken(env.SESSION_SIGNING_KEY);
       return Response.json({ token: session.token, expiresAt: new Date(session.claims.expiresAt * 1000).toISOString() }, { headers });
+    }
+
+    if (url.pathname === '/v1/routing/segment') {
+      if (request.method === 'OPTIONS') return preflight(request);
+      if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
+      const input = validateRoutingRequest(await parseBody(request));
+      if (!env?.ORS_API_KEY) throw new ApiError(500, 'routing_not_configured', '経路計算を利用できません。');
+      let result;
+      try {
+        result = await calculateRoute(input, env.ORS_API_KEY, fetcher, aiTimeoutMs);
+        if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, result); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
+      } catch (error) {
+        if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, null, error instanceof ApiError ? error.code : 'internal_error'); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
+        throw error;
+      }
+      return Response.json(result, { headers });
     }
 
     if (url.pathname === '/v1/ai/segment-candidates') {

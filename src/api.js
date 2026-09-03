@@ -92,3 +92,13 @@ export async function fetchAiCandidates(token, body, { fetchImpl = fetch, baseUr
   });
   return parseResponse(response);
 }
+
+export function buildRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {
+  return { requestId: createRequestId(), condition, before: placeForRequest(before), after: placeForRequest(after) };
+}
+
+export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL } = {}) {
+  const response = await fetchImpl(`${baseUrl}/v1/routing/segment`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildRoutingRequestBody(before, after, condition)) });
+  return parseResponse(response);
+}
