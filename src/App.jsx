@@ -2,8 +2,8 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
-import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
+import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, routeTotal, routingConditionForSegment, safeGoogleMapsUrl, segmentKey, setPlanRoutingCondition, setSegmentRoutingCondition, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
+import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
   PointerSensor.configure({
@@ -95,9 +95,61 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
   </article>;
 }
 
-function Segment({ before, after, candidates, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
+export const formatDuration = (seconds) => { if (seconds < 60) return '1分未満'; const minutes = Math.round(seconds / 60); const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours}時間${rest ? `${rest}分` : ''}` : `${rest}分`; };
+export const formatDistance = (meters) => meters < 1000 ? `${Math.max(1, Math.round(meters))} m` : `${(meters / 1000).toFixed(1).replace(/\.0$/u, '')} km`;
+export const formatRoute = (result) => `${formatDistance(result.distanceMeters)} ・ 約${formatDuration(result.durationSeconds)}`;
+
+const ROUTE_RETRY_DELAYS_MS = [1000, 3000];
+export const isRetryableRouteError = (error) => error instanceof WorkerApiError
+  && (error.retryable || [429, 503, 504].includes(error.httpStatus));
+const abortableSleep = (delay, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+  const id = setTimeout(resolve, delay);
+  signal?.addEventListener('abort', () => { clearTimeout(id); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+});
+export async function requestRouteWithRetry(request, sleep = abortableSleep, signal) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await request(); } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError') return { status: 'error', aborted: true };
+      if (!isRetryableRouteError(error) || attempt >= ROUTE_RETRY_DELAYS_MS.length) return { status: 'error' };
+      const delay = Number.isFinite(error.retryAfterMs)
+        ? Math.max(error.retryAfterMs, ROUTE_RETRY_DELAYS_MS[attempt])
+        : ROUTE_RETRY_DELAYS_MS[attempt];
+      try { await (signal ? sleep(delay, signal) : sleep(delay)); }
+      catch (sleepError) {
+        if (signal?.aborted || sleepError?.name === 'AbortError') return { status: 'error', aborted: true };
+        throw sleepError;
+      }
+    }
+  }
+}
+
+export function cachedRouteRequest(cache, identity, request) {
+  const cached = cache.get(identity);
+  if (cached) return cached;
+  const pending = request().then((result) => {
+    if (result?.status === 'error' && cache.get(identity) === pending) cache.delete(identity);
+    return result;
+  }, (error) => {
+    if (cache.get(identity) === pending) cache.delete(identity);
+    throw error;
+  });
+  cache.set(identity, pending);
+  return pending;
+}
+
+export function abortRouteRequests(cache, controllers) {
+  for (const controller of controllers.values()) controller.abort();
+  controllers.clear();
+  // An aborted promise must not survive React StrictMode's setup/cleanup/setup
+  // cycle; the next setup needs to issue a fresh request for the same segment.
+  cache.clear();
+}
+
+function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
+    <div className="route-metrics"><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? `${routeResult.confidence === 'approximate' ? '概算 ' : ''}${formatRoute(routeResult)}` : routeResult?.status === 'unresolved' ? '地点を特定できません' : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
     <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>
@@ -381,10 +433,38 @@ function formatPlanDate(date) {
 
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
+  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
   useEffect(() => { setSaved(false); const id = setTimeout(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(plan)); setSaved(true); }, 180); return () => clearTimeout(id); }, [plan]);
+  useEffect(() => {
+    let active = true;
+    const activeIdentities = new Set();
+    for (let index = 0; index < plan.points.length - 1; index += 1) {
+      const before = plan.points[index], after = plan.points[index + 1];
+      const condition = routingConditionForSegment(plan, before, after);
+      activeIdentities.add(JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]));
+    }
+    for (const [identity, controller] of routeControllers.current) {
+      if (!activeIdentities.has(identity)) { controller.abort(); routeControllers.current.delete(identity); routeCache.current.delete(identity); }
+    }
+    for (let index = 0; index < plan.points.length - 1; index += 1) {
+      const before = plan.points[index], after = plan.points[index + 1], key = segmentKey(before, after);
+      const condition = routingConditionForSegment(plan, before, after);
+      const identity = JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]);
+      const pending = cachedRouteRequest(routeCache.current, identity, () => {
+        const controller = new AbortController();
+        routeControllers.current.set(identity, controller);
+        return requestRouteWithRetry(() => fetchSegmentRoute(before, after, condition, { signal: controller.signal }), undefined, controller.signal)
+          .finally(() => { if (routeControllers.current.get(identity) === controller) routeControllers.current.delete(identity); });
+      });
+      setRouteResults((old) => ({ ...old, [key]: { status: 'loading' } }));
+      pending.then((result) => active && setRouteResults((old) => ({ ...old, [key]: result })));
+    }
+    return () => { active = false; };
+  }, [plan.points, plan.routingCondition, plan.segmentRoutingConditions]);
+  useEffect(() => () => abortRouteRequests(routeCache.current, routeControllers.current), []);
   const reset = () => { if (window.confirm('現在のドライブ内容を削除して、サンプルプランに戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
   const submitNewPlan = (values) => {
     if (!window.confirm('現在のドライブ内容を新しいドライブに置き換えます。よろしいですか？')) return;
@@ -404,11 +484,13 @@ export default function App() {
     const before = plan.points[index];
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    const condition = routingConditionForSegment(plan, before, after);
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
   };
+  const totalRoute = routeTotal(plan.points, routeResults);
   return <>
     <header className="app-header"><div className="brand"><span className="brand-mark">↗</span><span>DRIVE PLANNER</span></div><div className={`save-state ${saved ? '' : 'saving'}`}><i />{saved ? 'この端末に保存済み' : '保存中…'}</div></header>
-    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="hero-actions"><button className="edit-drive" onClick={() => setIsEditingPlan(true)}>ドライブ情報を編集</button><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button></div><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div></section>
+    <main><section className="hero"><span className="eyebrow">MY DRIVE PLAN</span><h1>{plan.title}</h1>{formatPlanDate(plan.date) && <time className="plan-date" dateTime={plan.date}>{formatPlanDate(plan.date)}</time>}<p>気になる場所を候補に置いて、好きな順番にルートを育てよう。</p><div className="hero-actions"><button className="edit-drive" onClick={() => setIsEditingPlan(true)}>ドライブ情報を編集</button><button className="new-drive" onClick={() => setIsCreating(true)}>＋ 新しいドライブ</button></div><div className="summary"><span><b>{plan.points.length}</b> ルート地点</span><span><b>{Object.values(plan.candidates).flat().length}</b> 候補</span></div><div className="route-summary"><label>全体の経路 <select value={plan.routingCondition} onChange={(event) => setPlan((old) => setPlanRoutingCondition(old, event.target.value))}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label>{totalRoute.completed > 0 && <strong>{totalRoute.complete ? '合計' : `計算済み ${totalRoute.completed}/${totalRoute.total}区間`} 約{formatDistance(totalRoute.distanceMeters)} ・ 約{formatDuration(totalRoute.durationSeconds)}</strong>}<small>距離・時間はリアルタイム交通を含まない計画用の目安です。</small></div></section>
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
           <div className="route-item route-endpoint">

@@ -40,15 +40,26 @@ OpenAIへ実際に送ったinput、解決したGoogle Maps文脈、instructions�
 - `SESSION_SIGNING_KEY`
 - `OPENAI_API_KEY`
 - `AI_LOG_EXPORT_KEY`
+- `ORS_API_KEY`
 
-ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。PRを `main` へマージする前に、担当者がCloudflare Dashboardで `OPENAI_API_KEY` と `AI_LOG_EXPORT_KEY` を含む4つのSecretを登録する必要があります。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
+## 経路計算
+
+`POST /v1/routing/segment` は確定した2地点を解決し、openrouteservice Directions V2の
+`driving-car`（`api.heigit.org`）で道路距離と所要時間を返します。「一般道中心」では
+`avoid_features: ["highways"]` を指定します。値はリアルタイム交通を含まない計画用の目安です。
+`ORS_API_KEY` はWorker SecretからAuthorization headerへ設定し、Frontendやログへ渡しません。
+評価情報はAI生成ログとは別の `routing_evaluation_logs` テーブルへ保存します。
+
+ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
 
 ## Rate Limit
 
-Cloudflare Workers Rate Limiting bindingを2系統使用します。
+Cloudflare Workers Rate Limiting bindingを4系統使用します。
 
 - `SESSION_RATE_LIMITER`: 接続元IPごとに **60秒あたり5回**。共有パスコードの総当たりを抑制します。
 - `AI_RATE_LIMITER`: 有効なsessionを持つ共有グループ全体で **60秒あたり10回**。tokenを再発行しても枠が増えない固定のgroup keyを使い、将来の外部API利用時の乱用を抑制します。
+- `ROUTING_IP_RATE_LIMITER`: routing専用のIP別上限（**60秒あたり10回**）。単一クライアントによる集中利用を抑制します。
+- `ROUTING_RATE_LIMITER`: routing専用の共有グループ全体で **60秒あたり30回**。IP別上限と二段でORS quotaを保護し、AI用の上限とは分離します。
 
 上限到達時は統一形式の `rate_limited` エラーを429で返します。Rate Limitingは乱用を抑える補助策であり、将来OpenAIへ接続する際の最終的な課金上限の代替にはなりません。
 
@@ -69,5 +80,17 @@ npm run dev
 ```
 
 GitHubリポジトリはCloudflare Workers Buildsと連携されており、production branchは `main` です。`main` へのpushまたはmergeによりCloudflare Workers Buildsが自動でbuild・deployします。GitHub Actions自身はWorkerをdeployしません。merge前にCloudflare Dashboardへrequired Secretを登録してください。
+
+初回deploy前、またはSecretを更新するときは、担当者が次のコマンドで5つすべてを登録します（値は対話入力し、ファイルやコマンドライン引数へ書きません）。
+
+```bash
+npx wrangler secret put DRIVE_PLANNER_PASSCODE
+npx wrangler secret put SESSION_SIGNING_KEY
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put AI_LOG_EXPORT_KEY
+npx wrangler secret put ORS_API_KEY
+```
+
+Cloudflare Workers Buildsのdeploy commandは **`npm run deploy`** に設定してください。npmの`predeploy`で`wrangler secret list`を照合し、上記のいずれか（`ORS_API_KEY`を含む）が未登録ならdeployを中止します。`npx wrangler deploy`を直接指定するとこの検査を迂回するため使用しません。
 
 Worker名は `drive-planner-api` です。

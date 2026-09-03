@@ -19,7 +19,7 @@ class FakeRateLimiter implements RateLimiter {
   }
 }
 
-function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean } = {}): Env {
+function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean; routingIpAllowed?: boolean; routingAllowed?: boolean } = {}): Env {
   return {
     DRIVE_PLANNER_PASSCODE: TEST_PASSCODE,
     SESSION_SIGNING_KEY: TEST_SIGNING_KEY,
@@ -28,6 +28,8 @@ function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean } 
     AI_LOGS_DB: undefined as unknown as Env['AI_LOGS_DB'],
     SESSION_RATE_LIMITER: new FakeRateLimiter(options.sessionAllowed),
     AI_RATE_LIMITER: new FakeRateLimiter(options.aiAllowed),
+    ROUTING_IP_RATE_LIMITER: new FakeRateLimiter(options.routingIpAllowed),
+    ROUTING_RATE_LIMITER: new FakeRateLimiter(options.routingAllowed),
   };
 }
 
@@ -70,6 +72,54 @@ describe('Drive Planner Worker', () => {
     const response = await handleRequest(new Request('https://api.example.test/health'), environment());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: 'ok' });
+  });
+
+  it('routing専用rate limitをORSより先に適用し、AI limiterへ影響させない', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const routing = env.ROUTING_RATE_LIMITER as FakeRateLimiter;
+    const routingIp = env.ROUTING_IP_RATE_LIMITER as FakeRateLimiter;
+    const ai = env.AI_RATE_LIMITER as FakeRateLimiter;
+    const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [139.7, 35.6] }, properties: { confidence: 0.9 } }] }))
+      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [138.7, 35.5] }, properties: { confidence: 0.9 } }] }))
+      .mockResolvedValueOnce(Response.json({ routes: [{ summary: { distance: 1000, duration: 600 } }] }));
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
+    expect(response.status).toBe(200);
+    expect(routing.keys).toEqual(['drive-planner-routing-shared-group-v1']);
+    expect(routingIp.keys).toEqual(['unknown']);
+    expect(ai.keys).toEqual([]);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('routing rate limit超過時はORSを呼ばず429を返す', async () => {
+    const env = environment({ routingAllowed: false }); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const fetcher = vi.fn();
+    const body = { requestId: 'route-request', condition: 'local_roads', before: fixture().segment.before, after: fixture().segment.after };
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
+    expect(response.status).toBe(429); expect(response.headers.get('Retry-After')).toBe('60');
+    expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Retry-After');
+    expect(await response.json()).toMatchObject({ error: { code: 'rate_limited', retryAfterSeconds: 60 } });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect((env.AI_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
+  });
+
+  it('IP別routing rate limitを共有上限より先に適用する', async () => {
+    const env = environment({ routingIpAllowed: false }); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const fetcher = vi.fn();
+    const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin, 'CF-Connecting-IP': '192.0.2.20' }), env, fetcher);
+    expect(response.status).toBe(429);
+    expect((env.ROUTING_IP_RATE_LIMITER as FakeRateLimiter).keys).toEqual(['192.0.2.20']);
+    expect((env.ROUTING_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('許可されていないOriginのrouting POSTをORSより先に拒否する', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー'; const fetcher = vi.fn();
+    const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
+    expect((await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: 'https://evil.example' }), env, fetcher)).status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled(); expect((env.ROUTING_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
   });
 
   it('管理ページはSecretを埋め込まずAuthorization headerでexportする', async () => {
@@ -225,8 +275,8 @@ describe('Drive Planner Worker', () => {
     expect(JSON.stringify(googleInit)).not.toContain(env.OPENAI_API_KEY);
     expect(JSON.stringify(googleInit)).not.toContain('Authorization');
     const openAiRequest = JSON.parse(vi.mocked(fetch).mock.calls[1][1]?.body as string);
-    expect(JSON.parse(openAiRequest.input).resolvedGoogleMapsContext['segment.after']).toMatchObject({
-      label: '湖畔のパン屋', latitude: 35.5, longitude: 138.7,
+    expect(JSON.parse(openAiRequest.input).resolvedGoogleMapsContext['segment.after']).toEqual({
+      label: '湖畔のパン屋', resolvedUrl: 'https://www.google.com/maps/place/%E6%B9%96%E7%95%94%E3%81%AE%E3%83%91%E3%83%B3%E5%B1%8B/@35.5,138.7,15z',
     });
     expect(openAiRequest.instructions).toContain('resolvedGoogleMapsContext');
     expect(openAiRequest.instructions).toContain('Web Searchは使用できません');

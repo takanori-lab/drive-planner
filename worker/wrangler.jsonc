@@ -7,9 +7,6 @@
   "observability": {
     "enabled": true
   },
-  "secrets": {
-    "required": ["DRIVE_PLANNER_PASSCODE", "SESSION_SIGNING_KEY", "OPENAI_API_KEY", "AI_LOG_EXPORT_KEY"]
-  },
   "d1_databases": [
     {
       "binding": "AI_LOGS_DB",
@@ -27,6 +24,16 @@
       "name": "AI_RATE_LIMITER",
       "namespace_id": "1002",
       "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "ROUTING_IP_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "ROUTING_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": { "limit": 30, "period": 60 }
     }
   ]
 }

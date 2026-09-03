@@ -51,10 +51,12 @@ export function extractGoogleMapsPlace(value: string): ResolvedGoogleMapsPlace |
   }
   const queryValue = url.searchParams.get('query') ?? url.searchParams.get('q');
   const query = queryValue?.trim() || undefined;
-  const at = url.href.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/u);
   const queryCoordinates = query?.match(/^(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)$/u);
-  const latitude = coordinate(at?.[1] ?? queryCoordinates?.[1] ?? null, -90, 90);
-  const longitude = coordinate(at?.[2] ?? queryCoordinates?.[2] ?? null, -180, 180);
+  // `/@lat,long,zoom` is the map viewport center, not necessarily the selected
+  // place. Only coordinates supplied as the explicit Maps query identify the
+  // destination closely enough to bypass geocoding.
+  const latitude = coordinate(queryCoordinates?.[1] ?? null, -90, 90);
+  const longitude = coordinate(queryCoordinates?.[2] ?? null, -180, 180);
   return { ...(label ? { label } : {}), ...(query ? { query } : {}),
     ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}), resolvedUrl: url.href };
 }
