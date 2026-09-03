@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { cachedRouteRequest, formatDistance, formatDuration, requestRouteWithRetry } from './App';
+import { abortRouteRequests, cachedRouteRequest, formatDistance, formatDuration, requestRouteWithRetry } from './App';
 import { WorkerApiError } from './api';
 
 it('成功結果は再利用し、一時的なerrorは次の機会に再試行する', async () => {
@@ -55,6 +55,18 @@ it('中止された待機後は古いルートを再試行しない', async () =
   controller.abort();
   await expect(pending).resolves.toMatchObject({ status: 'error', aborted: true });
   expect(request).toHaveBeenCalledOnce();
+});
+
+it('unmount時に中止済みrequestをcacheへ残さない', () => {
+  const abort = vi.fn();
+  const cache = new Map([['segment', Promise.resolve({ status: 'ok' })]]);
+  const controllers = new Map([['segment', { abort }]]);
+
+  abortRouteRequests(cache, controllers);
+
+  expect(abort).toHaveBeenCalledOnce();
+  expect(cache.size).toBe(0);
+  expect(controllers.size).toBe(0);
 });
 
 it('短い距離と時間をゼロに丸めず表示する', () => {

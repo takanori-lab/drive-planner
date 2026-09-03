@@ -419,6 +419,18 @@ describe('plan model', () => {
     expect(inserted.segmentRoutingConditions).not.toHaveProperty(oldKey);
   });
 
+  it('同じ経路条件を持つ両区間を結合すると条件を引き継ぐ', () => {
+    const plan = initialPlan();
+    const key = segmentKey(plan.points[0], plan.points[1]);
+    plan.candidates[key] = [{ id: 'falls', name: '田原の滝', locationNote: '', memo: '' }];
+    plan.segmentRoutingConditions[key] = 'local_roads';
+
+    const inserted = insertCandidate(plan, 0, 'falls');
+    const removed = removePoint(inserted, 1);
+
+    expect(removed.segmentRoutingConditions).toEqual({ [key]: 'local_roads' });
+  });
+
   it('updates candidate locationNote without changing its id or segment', () => {
     const plan = initialPlan();
     const key = segmentKey(plan.points[0], plan.points[1]);

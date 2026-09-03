@@ -50,7 +50,7 @@ OpenAIへ実際に送ったinput、解決したGoogle Maps文脈、instructions�
 `ORS_API_KEY` はWorker SecretからAuthorization headerへ設定し、Frontendやログへ渡しません。
 評価情報はAI生成ログとは別の `routing_evaluation_logs` テーブルへ保存します。
 
-ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。PRを `main` へマージする前に、担当者がCloudflare Dashboardで `OPENAI_API_KEY`、`AI_LOG_EXPORT_KEY`、`ORS_API_KEY` を含む5つのSecretを登録する必要があります。`secrets.required` によりrequired Secretが未設定の場合はdeployが失敗します。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
+ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
 
 ## Rate Limit
 
@@ -80,5 +80,17 @@ npm run dev
 ```
 
 GitHubリポジトリはCloudflare Workers Buildsと連携されており、production branchは `main` です。`main` へのpushまたはmergeによりCloudflare Workers Buildsが自動でbuild・deployします。GitHub Actions自身はWorkerをdeployしません。merge前にCloudflare Dashboardへrequired Secretを登録してください。
+
+初回deploy前、またはSecretを更新するときは、担当者が次のコマンドで5つすべてを登録します（値は対話入力し、ファイルやコマンドライン引数へ書きません）。
+
+```bash
+npx wrangler secret put DRIVE_PLANNER_PASSCODE
+npx wrangler secret put SESSION_SIGNING_KEY
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put AI_LOG_EXPORT_KEY
+npx wrangler secret put ORS_API_KEY
+```
+
+Cloudflare Workers Buildsのdeploy commandは **`npm run deploy`** に設定してください。npmの`predeploy`で`wrangler secret list`を照合し、上記のいずれか（`ORS_API_KEY`を含む）が未登録ならdeployを中止します。`npx wrangler deploy`を直接指定するとこの検査を迂回するため使用しません。
 
 Worker名は `drive-planner-api` です。

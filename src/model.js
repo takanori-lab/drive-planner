@@ -357,7 +357,12 @@ export function removePoint(plan, pointIndex) {
   delete candidates[rightKey];
   candidates[segmentKey(before, after)] = merged;
   const segmentRoutingConditions = { ...(plan.segmentRoutingConditions || {}) };
+  const leftCondition = segmentRoutingConditions[leftKey];
+  const rightCondition = segmentRoutingConditions[rightKey];
   delete segmentRoutingConditions[leftKey]; delete segmentRoutingConditions[rightKey];
+  if (leftCondition && leftCondition === rightCondition) {
+    segmentRoutingConditions[segmentKey(before, after)] = leftCondition;
+  }
   return { ...plan, points: plan.points.filter((_, index) => index !== pointIndex), candidates, segmentRoutingConditions };
 }
 

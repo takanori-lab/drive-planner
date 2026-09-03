@@ -138,6 +138,14 @@ export function cachedRouteRequest(cache, identity, request) {
   return pending;
 }
 
+export function abortRouteRequests(cache, controllers) {
+  for (const controller of controllers.values()) controller.abort();
+  controllers.clear();
+  // An aborted promise must not survive React StrictMode's setup/cleanup/setup
+  // cycle; the next setup needs to issue a fresh request for the same segment.
+  cache.clear();
+}
+
 function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
@@ -456,7 +464,7 @@ export default function App() {
     }
     return () => { active = false; };
   }, [plan.points, plan.routingCondition, plan.segmentRoutingConditions]);
-  useEffect(() => () => { for (const controller of routeControllers.current.values()) controller.abort(); }, []);
+  useEffect(() => () => abortRouteRequests(routeCache.current, routeControllers.current), []);
   const reset = () => { if (window.confirm('現在のドライブ内容を削除して、サンプルプランに戻しますか？')) { localStorage.removeItem(STORAGE_KEY); setPlan(initialPlan()); } };
   const submitNewPlan = (values) => {
     if (!window.confirm('現在のドライブ内容を新しいドライブに置き換えます。よろしいですか？')) return;
