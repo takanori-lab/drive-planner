@@ -46,6 +46,13 @@ describe('openrouteservice routing provider', () => {
     expect(geocodeUrl!.searchParams.get('boundary.country')).toBe('JP');
     expect(result).toMatchObject({ locationResolution: { before: 'google_maps_query_geocoding' } });
   });
+  it('URLのテキストqueryにlocationNoteを加えてgeocodingする', async () => {
+    const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps?query=%E3%82%B9%E3%82%BF%E3%83%BC%E3%83%90%E3%83%83%E3%82%AF%E3%82%B9'; target.before.locationNote = '渋谷駅周辺';
+    const fetcher = vi.fn().mockResolvedValueOnce(geocode(139, 35)).mockResolvedValueOnce(geocode(138, 35)).mockResolvedValueOnce(directions());
+    await calculateRoute(target, 'dummy', fetcher);
+    const geocodeQueries = fetcher.mock.calls.slice(0, 2).map(([url]) => new URL(url).searchParams.get('text'));
+    expect(geocodeQueries).toContain('スターバックス 渋谷駅周辺');
+  });
   it('地点を解決できなければrouteを生成しない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => Response.json({ features: [] })); expect(await calculateRoute(input(), 'dummy', fetcher)).toMatchObject({ status: 'unresolved', unresolved: ['before', 'after'] });
   });

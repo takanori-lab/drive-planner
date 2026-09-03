@@ -38,7 +38,7 @@ export async function resolveLocation(place: PlaceInput, apiKey: string, fetcher
   if (place.googleMapsUrl) {
     const resolved = await resolveGoogleMapsUrl(place.googleMapsUrl, fetcher, Math.min(timeoutMs, 3000));
     if (resolved?.latitude !== undefined && resolved.longitude !== undefined) return { latitude: resolved.latitude, longitude: resolved.longitude, method: 'google_maps_coordinates', confidence: 'exact' };
-    query = resolved?.query || [resolved?.label, place.locationNote].filter(Boolean).join(' ').trim();
+    query = [resolved?.query || resolved?.label, place.locationNote].filter(Boolean).join(' ').trim();
   }
   const method: ResolutionMethod = query ? 'google_maps_query_geocoding' : 'place_geocoding';
   if (!query) query = [place.name, place.locationNote].filter(Boolean).join(' ').trim();
