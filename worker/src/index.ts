@@ -27,6 +27,7 @@ export interface Env {
   AI_LOGS_DB: D1Database;
   SESSION_RATE_LIMITER: RateLimiter;
   AI_RATE_LIMITER: RateLimiter;
+  ROUTING_IP_RATE_LIMITER: RateLimiter;
   ROUTING_RATE_LIMITER: RateLimiter;
 }
 
@@ -145,7 +146,9 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       if (request.method === 'OPTIONS') return preflight(request);
       if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
       if (!allowedOrigin(request.headers.get('Origin'))) throw new ApiError(403, 'invalid_request', '許可されていないOriginです。');
-      if (!env?.ROUTING_RATE_LIMITER) throw new Error('Worker configuration is incomplete');
+      if (!env?.ROUTING_IP_RATE_LIMITER || !env.ROUTING_RATE_LIMITER) throw new Error('Worker configuration is incomplete');
+      const connectionKey = request.headers.get('CF-Connecting-IP') || 'unknown';
+      if (!(await env.ROUTING_IP_RATE_LIMITER.limit({ key: connectionKey })).success) throw rateLimited();
       if (!(await env.ROUTING_RATE_LIMITER.limit({ key: SHARED_ROUTING_RATE_LIMIT_KEY })).success) throw rateLimited();
       const input = validateRoutingRequest(await parseBody(request));
       if (!env?.ORS_API_KEY) throw new ApiError(500, 'routing_not_configured', '経路計算を利用できません。');

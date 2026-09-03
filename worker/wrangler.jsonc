@@ -29,8 +29,13 @@
       "simple": { "limit": 10, "period": 60 }
     },
     {
-      "name": "ROUTING_RATE_LIMITER",
+      "name": "ROUTING_IP_RATE_LIMITER",
       "namespace_id": "1003",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "ROUTING_RATE_LIMITER",
+      "namespace_id": "1004",
       "simple": { "limit": 30, "period": 60 }
     }
   ]

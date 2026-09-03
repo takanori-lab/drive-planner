@@ -404,6 +404,21 @@ describe('plan model', () => {
     expect(removed.candidates[key][0]).toMatchObject({ name: '田原の滝', locationNote: '山梨県都留市', memo: '景色が良さそう' });
   });
 
+  it('候補昇格時に区間の経路条件を分割後の両区間へ引き継ぐ', () => {
+    const plan = initialPlan();
+    const before = plan.points[0]; const after = plan.points[1];
+    const oldKey = segmentKey(before, after);
+    plan.candidates[oldKey] = [{ id: 'falls', name: '田原の滝', locationNote: '', memo: '' }];
+    plan.segmentRoutingConditions[oldKey] = 'local_roads';
+
+    const inserted = insertCandidate(plan, 0, 'falls');
+    expect(inserted.segmentRoutingConditions).toEqual({
+      [`${before.id}::falls`]: 'local_roads',
+      [`falls::${after.id}`]: 'local_roads',
+    });
+    expect(inserted.segmentRoutingConditions).not.toHaveProperty(oldKey);
+  });
+
   it('updates candidate locationNote without changing its id or segment', () => {
     const plan = initialPlan();
     const key = segmentKey(plan.points[0], plan.points[1]);

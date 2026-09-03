@@ -95,8 +95,21 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
   </article>;
 }
 
-const formatDuration = (seconds) => { const minutes = Math.round(seconds / 60); const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours}時間${rest ? `${rest}分` : ''}` : `${rest}分`; };
-const formatRoute = (result) => `${Math.round(result.distanceMeters / 1000)} km ・ 約${formatDuration(result.durationSeconds)}`;
+export const formatDuration = (seconds) => { if (seconds < 60) return '1分未満'; const minutes = Math.round(seconds / 60); const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours ? `${hours}時間${rest ? `${rest}分` : ''}` : `${rest}分`; };
+export const formatDistance = (meters) => meters < 1000 ? `${Math.max(1, Math.round(meters))} m` : `${(meters / 1000).toFixed(1).replace(/\.0$/u, '')} km`;
+export const formatRoute = (result) => `${formatDistance(result.distanceMeters)} ・ 約${formatDuration(result.durationSeconds)}`;
+
+const ROUTE_RETRY_DELAYS_MS = [1000, 3000];
+export const isRetryableRouteError = (error) => error instanceof WorkerApiError
+  && (error.retryable || [429, 503, 504].includes(error.httpStatus));
+export async function requestRouteWithRetry(request, sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await request(); } catch (error) {
+      if (!isRetryableRouteError(error) || attempt >= ROUTE_RETRY_DELAYS_MS.length) return { status: 'error' };
+      await sleep(ROUTE_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
 
 export function cachedRouteRequest(cache, identity, request) {
   const cached = cache.get(identity);
@@ -410,7 +423,7 @@ export default function App() {
       const before = plan.points[index], after = plan.points[index + 1], key = segmentKey(before, after);
       const condition = routingConditionForSegment(plan, before, after);
       const identity = JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]);
-      const pending = cachedRouteRequest(routeCache.current, identity, () => fetchSegmentRoute(before, after, condition).catch(() => ({ status: 'error' })));
+      const pending = cachedRouteRequest(routeCache.current, identity, () => requestRouteWithRetry(() => fetchSegmentRoute(before, after, condition)));
       setRouteResults((old) => ({ ...old, [key]: { status: 'loading' } }));
       pending.then((result) => active && setRouteResults((old) => ({ ...old, [key]: result })));
     }

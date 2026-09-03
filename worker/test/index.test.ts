@@ -19,7 +19,7 @@ class FakeRateLimiter implements RateLimiter {
   }
 }
 
-function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean; routingAllowed?: boolean } = {}): Env {
+function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean; routingIpAllowed?: boolean; routingAllowed?: boolean } = {}): Env {
   return {
     DRIVE_PLANNER_PASSCODE: TEST_PASSCODE,
     SESSION_SIGNING_KEY: TEST_SIGNING_KEY,
@@ -28,6 +28,7 @@ function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean; r
     AI_LOGS_DB: undefined as unknown as Env['AI_LOGS_DB'],
     SESSION_RATE_LIMITER: new FakeRateLimiter(options.sessionAllowed),
     AI_RATE_LIMITER: new FakeRateLimiter(options.aiAllowed),
+    ROUTING_IP_RATE_LIMITER: new FakeRateLimiter(options.routingIpAllowed),
     ROUTING_RATE_LIMITER: new FakeRateLimiter(options.routingAllowed),
   };
 }
@@ -76,6 +77,7 @@ describe('Drive Planner Worker', () => {
   it('routing専用rate limitをORSより先に適用し、AI limiterへ影響させない', async () => {
     const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー';
     const routing = env.ROUTING_RATE_LIMITER as FakeRateLimiter;
+    const routingIp = env.ROUTING_IP_RATE_LIMITER as FakeRateLimiter;
     const ai = env.AI_RATE_LIMITER as FakeRateLimiter;
     const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
     const fetcher = vi.fn()
@@ -85,6 +87,7 @@ describe('Drive Planner Worker', () => {
     const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
     expect(response.status).toBe(200);
     expect(routing.keys).toEqual(['drive-planner-routing-shared-group-v1']);
+    expect(routingIp.keys).toEqual(['unknown']);
     expect(ai.keys).toEqual([]);
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
@@ -97,6 +100,17 @@ describe('Drive Planner Worker', () => {
     expect(response.status).toBe(429); expect(await response.json()).toMatchObject({ error: { code: 'rate_limited' } });
     expect(fetcher).not.toHaveBeenCalled();
     expect((env.AI_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
+  });
+
+  it('IP別routing rate limitを共有上限より先に適用する', async () => {
+    const env = environment({ routingIpAllowed: false }); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const fetcher = vi.fn();
+    const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin, 'CF-Connecting-IP': '192.0.2.20' }), env, fetcher);
+    expect(response.status).toBe(429);
+    expect((env.ROUTING_IP_RATE_LIMITER as FakeRateLimiter).keys).toEqual(['192.0.2.20']);
+    expect((env.ROUTING_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('許可されていないOriginのrouting POSTをORSより先に拒否する', async () => {

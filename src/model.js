@@ -298,8 +298,17 @@ export function insertCandidate(plan, segmentIndex, candidateId) {
   const rest = (plan.candidates[oldKey] || []).filter((item) => item.id !== candidateId);
   const candidates = { ...plan.candidates };
   delete candidates[oldKey];
-  if (rest.length) candidates[segmentKey(before, point)] = rest;
-  return { ...plan, points, candidates };
+  const leftKey = segmentKey(before, point);
+  const rightKey = segmentKey(point, after);
+  if (rest.length) candidates[leftKey] = rest;
+  const segmentRoutingConditions = { ...(plan.segmentRoutingConditions || {}) };
+  const inheritedCondition = segmentRoutingConditions[oldKey];
+  delete segmentRoutingConditions[oldKey];
+  if (inheritedCondition) {
+    segmentRoutingConditions[leftKey] = inheritedCondition;
+    segmentRoutingConditions[rightKey] = inheritedCondition;
+  }
+  return { ...plan, points, candidates, segmentRoutingConditions };
 }
 
 export function updateCandidate(plan, key, candidateId, updates) {

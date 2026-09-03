@@ -54,11 +54,12 @@ OpenAIへ実際に送ったinput、解決したGoogle Maps文脈、instructions�
 
 ## Rate Limit
 
-Cloudflare Workers Rate Limiting bindingを3系統使用します。
+Cloudflare Workers Rate Limiting bindingを4系統使用します。
 
 - `SESSION_RATE_LIMITER`: 接続元IPごとに **60秒あたり5回**。共有パスコードの総当たりを抑制します。
 - `AI_RATE_LIMITER`: 有効なsessionを持つ共有グループ全体で **60秒あたり10回**。tokenを再発行しても枠が増えない固定のgroup keyを使い、将来の外部API利用時の乱用を抑制します。
-- `ROUTING_RATE_LIMITER`: routing専用の共有グループ全体で **60秒あたり30回**。ORS quotaを保護し、AI用の上限とは分離します。
+- `ROUTING_IP_RATE_LIMITER`: routing専用のIP別上限（**60秒あたり10回**）。単一クライアントによる集中利用を抑制します。
+- `ROUTING_RATE_LIMITER`: routing専用の共有グループ全体で **60秒あたり30回**。IP別上限と二段でORS quotaを保護し、AI用の上限とは分離します。
 
 上限到達時は統一形式の `rate_limited` エラーを429で返します。Rate Limitingは乱用を抑える補助策であり、将来OpenAIへ接続する際の最終的な課金上限の代替にはなりません。
 
