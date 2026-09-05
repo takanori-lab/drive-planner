@@ -68,7 +68,7 @@ describe('openrouteservice routing provider', () => {
       if (url === ORS_DIRECTIONS_URL) return directions();
       const text = new URL(url).searchParams.get('text') ?? '';
       return text.includes('東京駅')
-        ? geocode(139.767, 35.681, '東京駅', { region: '東京都' })
+        ? geocode(139.767, 35.681, '東京駅', { label: '東京駅, 東京都千代田区', region: '東京都' })
         : geocode(138.769, 35.498, '河口湖駅');
     });
     await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({ status: 'ok' });

@@ -74,6 +74,30 @@ describe('ORS/Pelias地点解決fallback', () => {
     await expect(run(geocode('東京都 府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
   });
 
+  it('canonical nameの未検証部分を無視して無関係なfeatureを採用しない', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => response(feature('南口', 139.9, 35.9, {
+      label: '南口, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('東京都 府中駅 南口'), fetcher)).resolves.toBeNull();
+  });
+
+  it('POI名内部の都道府県文字列より明示的なlocationNoteを優先する', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('東京都市大学 横浜キャンパス', 139.58, 35.49, {
+      label: '東京都市大学 横浜キャンパス, 神奈川県', region: '神奈川県',
+    })));
+    await expect(run(geocode('東京都市大学 横浜キャンパス', '東京都市大学 横浜キャンパス', '神奈川県'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.58 });
+  });
+
+  it('明示的なlocationNoteの東京都を優先して同名候補を絞り込む', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(
+      feature('府中駅', 139.477, 35.672, { region: '東京都' }),
+      feature('府中駅', 133.236, 34.568, { region: '広島県' }),
+    ));
+    await expect(run(geocode('府中駅 広島県', '府中駅', '東京都'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.477 });
+  });
+
   it.each([
     ['東京駅', feature('東京駅ホテル', 139, 35)],
     ['勝浦駅', feature('勝浦', 140, 35, { layer: 'locality' })],

@@ -27,16 +27,35 @@ const PREFECTURES = [
 ] as const;
 const ACCEPTED_LAYERS = new Set(['venue', 'address', 'street', 'station', 'locality', 'neighbourhood']);
 const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-_()（）]/g, '');
-const explicitPrefecture = (...values: string[]) => PREFECTURES.find((prefecture) => values.some((value) => value.includes(prefecture)));
+const components = (value: string) => value.normalize('NFKC').split(/[\s　・･,，.。\-_()（）]+/).filter(Boolean);
+const prefectureInLocationNote = (value: string) => PREFECTURES.find((prefecture) =>
+  value.trim().startsWith(prefecture) || components(value).includes(prefecture));
+const prefectureComponent = (value: string) => PREFECTURES.find((prefecture) => components(value).includes(prefecture));
+
+function explicitPrefecture(locationNote: string, searchText: string, canonicalName: string): typeof PREFECTURES[number] | undefined {
+  // A location note is explicit context and wins over less authoritative text.
+  // In a name or Maps query, require a standalone component so POI names such
+  // as `東京都市大学` cannot accidentally become a Tokyo region constraint.
+  return prefectureInLocationNote(locationNote) ?? prefectureComponent(searchText) ?? prefectureComponent(canonicalName);
+}
 
 function nameMatches(properties: NonNullable<Feature['properties']>, canonicalName: string, prefecture?: string): boolean {
   const wantedName = normalize(canonicalName);
   const featureName = normalize(properties.name);
   if (featureName === wantedName) return true;
-  // A qualified user/Maps name can put the prefecture before or after the bare
-  // Pelias feature name. Only relax exact matching when that explicit context
-  // is also verified against the feature's region below.
-  return Boolean(prefecture && featureName && (wantedName.startsWith(featureName) || wantedName.endsWith(featureName)));
+  if (!featureName) return false;
+
+  const nameComponents = components(canonicalName);
+  const matchingIndex = nameComponents.findIndex((component) => normalize(component) === featureName);
+  if (matchingIndex < 0) return false;
+
+  // A qualified name may match a bare feature name only when every remaining
+  // component is independently present in Pelias hierarchy/label metadata.
+  // This deliberately avoids loose prefix/suffix matching.
+  const metadata = normalize([properties.region, properties.region_a, properties.label].filter(Boolean).join(' '));
+  const qualifiers = nameComponents.filter((_, index) => index !== matchingIndex).map(normalize);
+  return qualifiers.length > 0 && qualifiers.every((qualifier) => metadata.includes(qualifier))
+    && (!prefecture || metadata.includes(normalize(prefecture)));
 }
 
 function chooseFeature(features: Feature[], canonicalName: string, prefecture?: string): { feature?: Feature; ambiguous: boolean } {
