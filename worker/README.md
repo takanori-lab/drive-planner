@@ -50,6 +50,20 @@ OpenAIへ実際に送ったinput、解決したGoogle Maps文脈、instructions�
 `ORS_API_KEY` はWorker SecretからAuthorization headerへ設定し、Frontendやログへ渡しません。
 評価情報はAI生成ログとは別の `routing_evaluation_logs` テーブルへ保存します。
 
+地点解決は、Google Maps URL内の確定座標を最優先し、座標がなければPeliasの通常検索を行います。
+通常検索では最大5候補から地点名、`locationNote` の都道府県・市区町村、地点種別、`confidence` を照合します。
+十分な候補がない場合だけ、`locationNote` がある地点では地点名のみの検索、最後に
+`/pelias/v1/search/structured` の `venue` と地域文脈を使う検索を行います。地点ごとのGeocodingは最大3回
+（`locationNote` がない場合は最大2回）で、地域と矛盾する候補や低confidence候補は採用しません。
+HTTP 429 / 5xxの通信再試行はこの検索条件fallbackには含めず、従来どおりクライアント側のbounded retryで扱います。
+
+`routing_evaluation_logs.resolution_methods_json` には `google_maps_coordinates`、
+`place_geocoding` / `google_maps_query_geocoding`、`name_only_geocoding`、
+`structured_geocoding`、`unresolved` のいずれかをbefore / after別に記録します。これにより、
+駅名（東京駅・千葉駅・勝浦駅）、観光地（河口湖）、公園、店舗など同じ代表ケース群について、
+地点名のみ / `locationNote` あり / Google Maps URLありの解決率を方式別に比較できます。
+自動テストの比較は外部ORSへ接続せず、Peliasレスポンスのmockを使います。
+
 ローカル開発では、コミット対象外の `.dev.vars` に開発専用の値を設定します。`OPENAI_API_KEY` の実値は、コード、README、テストを含むリポジトリへ絶対に置かないでください。実行時のSecret不足は設定内容やSecret名をクライアントへ公開せず `internal_error` として扱います。
 
 ## Rate Limit
