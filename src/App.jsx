@@ -146,10 +146,12 @@ export function abortRouteRequests(cache, controllers) {
   cache.clear();
 }
 
-function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
+export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
+  const unresolvedNames = routeResult?.status === 'unresolved'
+    ? routeResult.unresolved?.map((side) => side === 'before' ? before.name : after.name).filter(Boolean) : [];
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
-    <div className="route-metrics"><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? `${routeResult.confidence === 'approximate' ? '概算 ' : ''}${formatRoute(routeResult)}` : routeResult?.status === 'unresolved' ? '地点を特定できません' : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
+    <div className="route-metrics"><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? `${routeResult.confidence === 'approximate' ? '概算 ' : ''}${formatRoute(routeResult)}` : routeResult?.status === 'unresolved' ? `${unresolvedNames.join('・') || '地点'}を特定できません` : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
     <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>

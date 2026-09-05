@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AiCandidateResults, AiCandidateSheet, AiSearchingView, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, SearchCompanionAnimation, acquireSearchInFlight, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
+import { AiCandidateResults, AiCandidateSheet, AiSearchingView, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, SearchCompanionAnimation, Segment, acquireSearchInFlight, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
 import { initialPlan } from './model';
 import { SESSION_STORAGE_KEY } from './api';
 
@@ -17,6 +17,14 @@ const validSession = () => ({ token: 'valid-session-token', expiresAt: new Date(
 const candidate = (index) => ({ resultId: `result-${index}`, name: `候補${index}`, locationHint: '山梨県', description: '説明', reason: '理由', detourLevel: 'small', detourNote: '少し寄り道', checkItems: ['営業時間'] });
 
 describe('既存ドライブ編集UI', () => {
+  it('地点解決できなかった側の地点名を表示する', () => {
+    const html = renderToStaticMarkup(<Segment before={{ name: '千葉駅' }} after={{ name: '勝浦駅' }} candidates={[]}
+      routeResult={{ status: 'unresolved', unresolved: ['after'] }} condition="recommended" onCondition={() => undefined}
+      onAdd={() => undefined} onAsk={() => undefined} onEdit={() => undefined} onMove={() => undefined} onPromote={() => undefined} onDelete={() => undefined} />);
+    expect(html).toContain('勝浦駅を特定できません');
+    expect(html).not.toContain('千葉駅・勝浦駅を特定できません');
+  });
+
   it('現在値入りのドライブ情報編集Sheetを表示する', () => {
     const html = renderToStaticMarkup(<PlanInfoSheet plan={{ title: '夏のドライブ', date: '2026-08-24' }} onClose={() => undefined} onSubmit={() => undefined} />);
     expect(html).toContain('ドライブ情報を編集');
