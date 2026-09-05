@@ -1,15 +1,17 @@
 import { ApiError } from './errors';
 import { resolveGoogleMapsUrl } from './google-maps';
+import { geocodePlace, ORS_GEOCODE_URL, type GeocodingMethod } from './geocoding';
 import type { PlaceInput } from './validation';
 
 export const ROUTING_POLICY_VERSION = 'ors-v1';
 export const ORS_DIRECTIONS_URL = 'https://api.heigit.org/openrouteservice/v2/directions/driving-car/json';
-export const ORS_GEOCODE_URL = 'https://api.heigit.org/pelias/v1/search';
+export { ORS_GEOCODE_URL };
 export type RouteCondition = 'recommended' | 'local_roads';
-export type ResolutionMethod = 'google_maps_coordinates' | 'google_maps_query_geocoding' | 'place_geocoding';
+export type ResolutionMethod = 'google_maps_coordinates' | GeocodingMethod | 'unresolved';
 export interface RoutingInput { requestId: string; condition: RouteCondition; before: PlaceInput; after: PlaceInput }
 export interface ResolvedLocation { longitude: number; latitude: number; method: ResolutionMethod; confidence: 'exact' | 'approximate' }
 export interface RoutingResult { status: 'ok'; provider: 'openrouteservice'; routingPolicyVersion: string; condition: RouteCondition; distanceMeters: number; durationSeconds: number; locationResolution: { before: ResolutionMethod; after: ResolutionMethod }; confidence: 'exact' | 'approximate' }
+export interface UnresolvedRoutingResult { status: 'unresolved'; provider: 'openrouteservice'; routingPolicyVersion: string; unresolved: ('before'|'after')[]; locationResolution: { before: ResolutionMethod; after: ResolutionMethod } }
 
 function retryAfterSeconds(response: Response): number | undefined {
   if (response.status !== 429) return undefined;
@@ -34,27 +36,23 @@ async function withTimeout(fetcher: typeof fetch, url: string, init: RequestInit
 }
 
 export async function resolveLocation(place: PlaceInput, apiKey: string, fetcher: typeof fetch, timeoutMs: number): Promise<ResolvedLocation | null> {
-  let query = '';
+  let query = place.name.trim();
+  let method: 'place_geocoding' | 'google_maps_query_geocoding' = 'place_geocoding';
   if (place.googleMapsUrl) {
     const resolved = await resolveGoogleMapsUrl(place.googleMapsUrl, fetcher, Math.min(timeoutMs, 3000));
     if (resolved?.latitude !== undefined && resolved.longitude !== undefined) return { latitude: resolved.latitude, longitude: resolved.longitude, method: 'google_maps_coordinates', confidence: 'exact' };
-    query = [resolved?.query || resolved?.label, place.locationNote].filter(Boolean).join(' ').trim();
+    query = (resolved?.query || resolved?.label || place.name).trim();
+    method = 'google_maps_query_geocoding';
   }
-  const method: ResolutionMethod = query ? 'google_maps_query_geocoding' : 'place_geocoding';
-  if (!query) query = [place.name, place.locationNote].filter(Boolean).join(' ').trim();
   if (!query) return null;
-  const url = new URL(ORS_GEOCODE_URL); url.searchParams.set('text', query); url.searchParams.set('size', '1'); url.searchParams.set('boundary.country', 'JP');
-  const response = await withTimeout(fetcher, url.href, { headers: { Authorization: apiKey } }, timeoutMs);
-  if (!response.ok) throw upstreamUnavailable(response, '地点を特定できませんでした。');
-  const json = await response.json() as { features?: Array<{ geometry?: { coordinates?: number[] }; properties?: { confidence?: number } }> };
-  const feature = json.features?.[0]; const coordinates = feature?.geometry?.coordinates;
-  if (!coordinates || coordinates.length < 2 || !coordinates.every(Number.isFinite)) return null;
-  return { longitude: coordinates[0], latitude: coordinates[1], method, confidence: (feature?.properties?.confidence ?? 0) >= 0.8 ? 'exact' : 'approximate' };
+  return geocodePlace(query, place.locationNote, method, apiKey,
+    (url, init) => withTimeout(fetcher, url, init, timeoutMs));
 }
 
-export async function calculateRoute(input: RoutingInput, apiKey: string, fetcher: typeof fetch = fetch, timeoutMs = 8000): Promise<RoutingResult | { status: 'unresolved'; provider: 'openrouteservice'; routingPolicyVersion: string; unresolved: ('before'|'after')[] }> {
+export async function calculateRoute(input: RoutingInput, apiKey: string, fetcher: typeof fetch = fetch, timeoutMs = 8000): Promise<RoutingResult | UnresolvedRoutingResult> {
   const [before, after] = await Promise.all([resolveLocation(input.before, apiKey, fetcher, timeoutMs), resolveLocation(input.after, apiKey, fetcher, timeoutMs)]);
-  if (!before || !after) return { status: 'unresolved', provider: 'openrouteservice', routingPolicyVersion: ROUTING_POLICY_VERSION, unresolved: [...(!before ? ['before' as const] : []), ...(!after ? ['after' as const] : [])] };
+  if (!before || !after) return { status: 'unresolved', provider: 'openrouteservice', routingPolicyVersion: ROUTING_POLICY_VERSION, unresolved: [...(!before ? ['before' as const] : []), ...(!after ? ['after' as const] : [])],
+    locationResolution: { before: before?.method ?? 'unresolved', after: after?.method ?? 'unresolved' } };
   const options = input.condition === 'local_roads' ? { avoid_features: ['highways'] } : undefined;
   const response = await withTimeout(fetcher, ORS_DIRECTIONS_URL, { method: 'POST', headers: { Authorization: apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ coordinates: [[before.longitude, before.latitude], [after.longitude, after.latitude]], ...(options ? { options } : {}) }) }, timeoutMs);
   if (!response.ok) throw upstreamUnavailable(response, '経路を計算できませんでした。');

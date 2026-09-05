@@ -42,7 +42,7 @@ describe('openrouteservice routing provider', () => {
     expect(geocodeUrl!.origin).toBe('https://api.heigit.org');
     expect(geocodeUrl!.pathname).toBe('/pelias/v1/search');
     expect(geocodeUrl!.searchParams.get('text')).toBe('東京駅 丸の内口');
-    expect(geocodeUrl!.searchParams.get('size')).toBe('1');
+    expect(geocodeUrl!.searchParams.get('size')).toBe('5');
     expect(geocodeUrl!.searchParams.get('boundary.country')).toBe('JP');
     expect(result).toMatchObject({ locationResolution: { before: 'google_maps_query_geocoding' } });
   });
@@ -54,7 +54,7 @@ describe('openrouteservice routing provider', () => {
     expect(geocodeQueries).toContain('スターバックス 渋谷駅周辺');
   });
   it('地点を解決できなければrouteを生成しない', async () => {
-    const fetcher = vi.fn().mockImplementation(async () => Response.json({ features: [] })); expect(await calculateRoute(input(), 'dummy', fetcher)).toMatchObject({ status: 'unresolved', unresolved: ['before', 'after'] });
+    const fetcher = vi.fn().mockImplementation(async () => Response.json({ features: [] })); expect(await calculateRoute(input(), 'dummy', fetcher)).toMatchObject({ status: 'unresolved', unresolved: ['before', 'after'], locationResolution: { before: 'unresolved', after: 'unresolved' } });
   });
   it('ORS errorとtimeoutを安全なerrorにする', async () => {
     await expect(calculateRoute(input(), 'dummy', vi.fn().mockResolvedValue(new Response('', { status: 503 })))).rejects.toMatchObject({ code: 'routing_unavailable' });
