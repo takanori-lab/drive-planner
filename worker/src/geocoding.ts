@@ -43,7 +43,13 @@ function administrativeParts(note: string): { region?: string; county?: string; 
       remainder = remainder.slice(countyMatch[1].length);
     }
     while (remainder) {
-      const match = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+?[市区町村])/);
+      // Use the last applicable suffix, since the suffix character can also be
+      // part of the municipality name (四日市市, 大町市). A city followed by a
+      // ward is handled first so the ward remains available for the next pass.
+      const city = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+市)(?=[一-龠々ヶぁ-んァ-ヶー]+区)/)
+        ?? remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+市)/);
+      const match = city ?? remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+区)/)
+        ?? remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+[町村])/);
       if (!match) break;
       const part = match[1];
       if (part.endsWith('区') && localities.some((locality) => locality.endsWith('市'))) boroughs.push(part);
@@ -119,11 +125,11 @@ export async function geocodePlace(
   if (!cleanName || !cleanExpectedName) return null;
   const normalText = [cleanName, cleanNote].filter(Boolean).join(' ');
   const steps: SearchStep[] = [{ method: normalMethod, structured: false, params: { text: normalText } }];
-  if (cleanNote) steps.push({ method: 'name_only_geocoding', structured: false, params: { text: cleanName } });
+  if (cleanNote) steps.push({ method: 'name_only_geocoding', structured: false, params: { text: cleanExpectedName } });
   {
     const context = structuredContext(cleanNote);
     steps.push({ method: 'structured_geocoding', structured: true, params: {
-      venue: cleanName, ...(context.region ? { region: context.region } : {}),
+      venue: cleanExpectedName, ...(context.region ? { region: context.region } : {}),
       ...(context.county ? { county: context.county } : {}),
       ...(context.locality ? { locality: context.locality } : {}), country: '日本',
       ...(context.borough ? { borough: context.borough } : {}),

@@ -82,6 +82,25 @@ describe('ORS/Pelias地点解決fallback', () => {
     expect(url.searchParams.get('locality')).toBe('富士河口湖町');
   });
 
+  it.each([
+    ['三重県四日市市', '三重県', '四日市市'],
+    ['長野県大町市', '長野県', '大町市'],
+  ])('市の文字を含む自治体名 %s を途中で切らない', async (note, region, locality) => {
+    const fetcher = vi.fn().mockImplementation(async () => response());
+    await geocodePlace('テスト地点', note, 'place_geocoding', 'key', fetcher);
+    const url = new URL(fetcher.mock.calls[2][0]);
+    expect(url.searchParams.get('region')).toBe(region);
+    expect(url.searchParams.get('locality')).toBe(locality);
+  });
+
+  it('Maps検索文は初回だけ使い、fallbackでは期待地点名を使う', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => response());
+    await geocodePlace('東京駅 東京都千代田区', '東京都千代田区', 'google_maps_query_geocoding', 'key', fetcher, '東京駅');
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('text')).toBe('東京駅 東京都千代田区 東京都千代田区');
+    expect(new URL(fetcher.mock.calls[1][0]).searchParams.get('text')).toBe('東京駅');
+    expect(new URL(fetcher.mock.calls[2][0]).searchParams.get('venue')).toBe('東京駅');
+  });
+
   it('完全一致する地点名をconfidenceの高い部分一致より優先する', async () => {
     const fetcher = vi.fn().mockResolvedValue(response(
       feature('東京駅ホテル', 139.77, 35.68, { confidence: 0.99 }),
