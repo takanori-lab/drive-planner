@@ -61,14 +61,16 @@ describe('ORS/Pelias地点解決fallback', () => {
   });
 
   it.each([
-    ['京都府京都市', '京都府', '京都市'],
-    ['丸の内口（東京都千代田区）', '東京都', '千代田区'],
-  ])('住所メモ %s から行政区画だけを抽出する', async (note, region, locality) => {
+    ['京都府京都市', '京都府', '京都市', null],
+    ['丸の内口（東京都千代田区）', '東京都', '千代田区', null],
+    ['千葉県千葉市中央区', '千葉県', '千葉市', '中央区'],
+  ])('住所メモ %s から行政区画だけを抽出する', async (note, region, locality, borough) => {
     const fetcher = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response()).mockResolvedValueOnce(response());
     await geocodePlace('テスト地点', note, 'place_geocoding', 'key', fetcher);
     const url = new URL(fetcher.mock.calls[2][0]);
     expect(url.searchParams.get('region')).toBe(region);
     expect(url.searchParams.get('locality')).toBe(locality);
+    expect(url.searchParams.get('borough')).toBe(borough);
   });
 
   it('完全一致する地点名をconfidenceの高い部分一致より優先する', async () => {
@@ -84,6 +86,14 @@ describe('ORS/Pelias地点解決fallback', () => {
   it('長音符を保持して異なる地点名を完全一致として扱わない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => response(feature('スパ', 139, 35)));
     await expect(geocodePlace('スーパー', '', 'place_geocoding', 'key', fetcher)).resolves.toBeNull();
+  });
+
+  it('完全一致する地点がなければ地点名を含む一般地域を採用しない', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => response(
+      feature('勝浦', 140.32, 35.15, { confidence: 0.99, layer: 'locality', region: '千葉県', locality: '勝浦市' }),
+    ));
+    await expect(geocodePlace('勝浦駅', '千葉県勝浦市', 'place_geocoding', 'key', fetcher)).resolves.toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(MAX_GEOCODING_REQUESTS);
   });
 
   it('HTTP retry対象エラーは検索条件fallbackへ進めずそのまま伝播する', async () => {

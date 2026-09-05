@@ -28,31 +28,34 @@ const PREFECTURES = [
   '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
 ] as const;
 
-function administrativeParts(note: string): { region?: string; localities: string[] } {
+function administrativeParts(note: string): { region?: string; localities: string[]; boroughs: string[] } {
   const region = PREFECTURES.find((prefecture) => note.includes(prefecture));
   const segments = (region ? note.slice(note.indexOf(region) + region.length) : note)
     .split(/[\s　,，、()（）]+/).filter(Boolean);
   const localities: string[] = [];
+  const boroughs: string[] = [];
   for (const segment of segments) {
     let remainder = segment;
     while (remainder) {
       const match = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+?[市区町村])/);
       if (!match) break;
-      localities.push(match[1]);
+      const part = match[1];
+      if (part.endsWith('区') && localities.some((locality) => locality.endsWith('市'))) boroughs.push(part);
+      else localities.push(part);
       remainder = remainder.slice(match[1].length);
     }
   }
-  return { region, localities };
+  return { region, localities, boroughs };
 }
 
 function contextParts(note: string): string[] {
-  const { region, localities } = administrativeParts(note);
-  return [region, ...localities].filter((part): part is string => Boolean(part)).map(normalize).filter((part) => part.length >= 2);
+  const { region, localities, boroughs } = administrativeParts(note);
+  return [region, ...localities, ...boroughs].filter((part): part is string => Boolean(part)).map(normalize).filter((part) => part.length >= 2);
 }
 
-function structuredContext(note: string): { region?: string; locality?: string } {
-  const { region, localities } = administrativeParts(note);
-  return { region, locality: localities.join('') || undefined };
+function structuredContext(note: string): { region?: string; locality?: string; borough?: string } {
+  const { region, localities, boroughs } = administrativeParts(note);
+  return { region, locality: localities.join('') || undefined, borough: boroughs.join('') || undefined };
 }
 
 function chooseFeature(features: Feature[], name: string, note: string, strictContext: boolean): Feature | undefined {
@@ -66,18 +69,19 @@ function chooseFeature(features: Feature[], name: string, note: string, strictCo
       const confidence = properties.confidence ?? 0;
       if (confidence < 0.7) return null;
       const candidateName = normalize(properties.name || properties.label);
-      const nameMatches = !candidateName || candidateName.includes(wantedName) || wantedName.includes(candidateName);
-      if (!nameMatches) return null;
+      // A related locality (for example, 勝浦 for 勝浦駅) is not a safe
+      // substitute: it can place the route at a city centroid. When Pelias
+      // supplies a feature name, require an exact normalized match.
+      if (candidateName && candidateName !== wantedName) return null;
       const contextText = normalize([properties.label, properties.region, properties.region_a, properties.county,
         properties.locality, properties.borough, properties.neighbourhood].filter(Boolean).join(' '));
       const matchingContext = wantedContext.filter((part) => contextText.includes(part)).length;
       if (strictContext && wantedContext.length > 0 && matchingContext !== wantedContext.length) return null;
       const placeBonus = !properties.layer || PLACE_LAYERS.has(properties.layer) ? 0.03 : -0.08;
-      return { feature, exactName: candidateName === wantedName,
-        score: confidence + 0.06 + matchingContext * 0.08 + placeBonus - index * 0.001 };
+      return { feature, score: confidence + 0.06 + matchingContext * 0.08 + placeBonus - index * 0.001 };
     })
-    .filter((candidate): candidate is { feature: Feature; exactName: boolean; score: number } => candidate !== null)
-    .sort((a, b) => Number(b.exactName) - Number(a.exactName) || b.score - a.score)[0]?.feature;
+    .filter((candidate): candidate is { feature: Feature; score: number } => candidate !== null)
+    .sort((a, b) => b.score - a.score)[0]?.feature;
 }
 
 function responseError(response: Response): ApiError {
@@ -113,6 +117,7 @@ export async function geocodePlace(
     steps.push({ method: 'structured_geocoding', structured: true, params: {
       venue: cleanName, ...(context.region ? { region: context.region } : {}),
       ...(context.locality ? { locality: context.locality } : {}), country: '日本',
+      ...(context.borough ? { borough: context.borough } : {}),
     } });
   }
 
