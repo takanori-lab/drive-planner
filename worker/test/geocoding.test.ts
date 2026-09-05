@@ -73,6 +73,15 @@ describe('ORS/Pelias地点解決fallback', () => {
     expect(url.searchParams.get('borough')).toBe(borough);
   });
 
+  it('郡を市町村から分離してstructured検索へ渡す', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => response());
+    await geocodePlace('河口湖駅', '山梨県南都留郡富士河口湖町', 'place_geocoding', 'key', fetcher);
+    const url = new URL(fetcher.mock.calls[2][0]);
+    expect(url.searchParams.get('region')).toBe('山梨県');
+    expect(url.searchParams.get('county')).toBe('南都留郡');
+    expect(url.searchParams.get('locality')).toBe('富士河口湖町');
+  });
+
   it('完全一致する地点名をconfidenceの高い部分一致より優先する', async () => {
     const fetcher = vi.fn().mockResolvedValue(response(
       feature('東京駅ホテル', 139.77, 35.68, { confidence: 0.99 }),

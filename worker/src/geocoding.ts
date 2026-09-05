@@ -28,14 +28,20 @@ const PREFECTURES = [
   '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
 ] as const;
 
-function administrativeParts(note: string): { region?: string; localities: string[]; boroughs: string[] } {
+function administrativeParts(note: string): { region?: string; county?: string; localities: string[]; boroughs: string[] } {
   const region = PREFECTURES.find((prefecture) => note.includes(prefecture));
   const segments = (region ? note.slice(note.indexOf(region) + region.length) : note)
     .split(/[\s　,，、()（）]+/).filter(Boolean);
   const localities: string[] = [];
   const boroughs: string[] = [];
+  let county: string | undefined;
   for (const segment of segments) {
     let remainder = segment;
+    const countyMatch = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+?郡)/);
+    if (countyMatch) {
+      county = countyMatch[1];
+      remainder = remainder.slice(countyMatch[1].length);
+    }
     while (remainder) {
       const match = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+?[市区町村])/);
       if (!match) break;
@@ -45,17 +51,17 @@ function administrativeParts(note: string): { region?: string; localities: strin
       remainder = remainder.slice(match[1].length);
     }
   }
-  return { region, localities, boroughs };
+  return { region, county, localities, boroughs };
 }
 
 function contextParts(note: string): string[] {
-  const { region, localities, boroughs } = administrativeParts(note);
-  return [region, ...localities, ...boroughs].filter((part): part is string => Boolean(part)).map(normalize).filter((part) => part.length >= 2);
+  const { region, county, localities, boroughs } = administrativeParts(note);
+  return [region, county, ...localities, ...boroughs].filter((part): part is string => Boolean(part)).map(normalize).filter((part) => part.length >= 2);
 }
 
-function structuredContext(note: string): { region?: string; locality?: string; borough?: string } {
-  const { region, localities, boroughs } = administrativeParts(note);
-  return { region, locality: localities.join('') || undefined, borough: boroughs.join('') || undefined };
+function structuredContext(note: string): { region?: string; county?: string; locality?: string; borough?: string } {
+  const { region, county, localities, boroughs } = administrativeParts(note);
+  return { region, county, locality: localities.join('') || undefined, borough: boroughs.join('') || undefined };
 }
 
 function chooseFeature(features: Feature[], name: string, note: string, strictContext: boolean): Feature | undefined {
@@ -100,15 +106,17 @@ function responseError(response: Response): ApiError {
 }
 
 export async function geocodePlace(
-  name: string,
+  searchText: string,
   locationNote: string,
   normalMethod: 'place_geocoding' | 'google_maps_query_geocoding',
   apiKey: string,
   request: (url: string, init: RequestInit) => Promise<Response>,
+  expectedName = searchText,
 ): Promise<GeocodedLocation | null> {
-  const cleanName = name.trim();
+  const cleanName = searchText.trim();
+  const cleanExpectedName = expectedName.trim();
   const cleanNote = locationNote.trim();
-  if (!cleanName) return null;
+  if (!cleanName || !cleanExpectedName) return null;
   const normalText = [cleanName, cleanNote].filter(Boolean).join(' ');
   const steps: SearchStep[] = [{ method: normalMethod, structured: false, params: { text: normalText } }];
   if (cleanNote) steps.push({ method: 'name_only_geocoding', structured: false, params: { text: cleanName } });
@@ -116,6 +124,7 @@ export async function geocodePlace(
     const context = structuredContext(cleanNote);
     steps.push({ method: 'structured_geocoding', structured: true, params: {
       venue: cleanName, ...(context.region ? { region: context.region } : {}),
+      ...(context.county ? { county: context.county } : {}),
       ...(context.locality ? { locality: context.locality } : {}), country: '日本',
       ...(context.borough ? { borough: context.borough } : {}),
     } });
@@ -129,7 +138,7 @@ export async function geocodePlace(
     const response = await request(url.href, { headers: { Authorization: apiKey } });
     if (!response.ok) throw responseError(response);
     const json = await response.json() as { features?: Feature[] };
-    const feature = chooseFeature(json.features ?? [], cleanName, cleanNote, contextParts(cleanNote).length > 0);
+    const feature = chooseFeature(json.features ?? [], cleanExpectedName, cleanNote, contextParts(cleanNote).length > 0);
     if (!feature) continue;
     const coordinates = feature.geometry!.coordinates!;
     return { longitude: coordinates[0], latitude: coordinates[1], method: step.method,

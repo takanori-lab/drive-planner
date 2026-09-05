@@ -3,7 +3,7 @@ import { resolveGoogleMapsUrl } from './google-maps';
 import { geocodePlace, ORS_GEOCODE_URL, type GeocodingMethod } from './geocoding';
 import type { PlaceInput } from './validation';
 
-export const ROUTING_POLICY_VERSION = 'ors-v1';
+export const ROUTING_POLICY_VERSION = 'ors-v2';
 export const ORS_DIRECTIONS_URL = 'https://api.heigit.org/openrouteservice/v2/directions/driving-car/json';
 export { ORS_GEOCODE_URL };
 export type RouteCondition = 'recommended' | 'local_roads';
@@ -47,7 +47,7 @@ export async function resolveLocation(place: PlaceInput, apiKey: string, fetcher
   }
   if (!query) return null;
   return geocodePlace(query, place.locationNote, method, apiKey,
-    (url, init) => withTimeout(fetcher, url, init, timeoutMs));
+    (url, init) => withTimeout(fetcher, url, init, timeoutMs), place.name);
 }
 
 export async function calculateRoute(input: RoutingInput, apiKey: string, fetcher: typeof fetch = fetch, timeoutMs = 8000): Promise<RoutingResult | UnresolvedRoutingResult> {

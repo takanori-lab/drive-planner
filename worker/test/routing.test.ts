@@ -10,7 +10,7 @@ describe('openrouteservice routing provider', () => {
   it.each([['recommended', undefined], ['local_roads', { avoid_features: ['highways'] }]] as const)('%sのrequestを生成しresponseをnormalizeする', async (condition, options) => {
     const fetcher = vi.fn().mockResolvedValueOnce(geocode(139.767, 35.681)).mockResolvedValueOnce(geocode(138.769, 35.498)).mockResolvedValueOnce(directions());
     const result = await calculateRoute(input(condition), 'dummy-test-key', fetcher);
-    expect(result).toMatchObject({ status: 'ok', provider: 'openrouteservice', routingPolicyVersion: 'ors-v1', distanceMeters: 132800, durationSeconds: 6300 });
+    expect(result).toMatchObject({ status: 'ok', provider: 'openrouteservice', routingPolicyVersion: 'ors-v2', distanceMeters: 132800, durationSeconds: 6300 });
     const [url, init] = fetcher.mock.calls[2]; expect(url).toBe(ORS_DIRECTIONS_URL); expect(init.headers.Authorization).toBe('dummy-test-key');
     expect(JSON.parse(init.body)).toEqual({ coordinates: [[139.767, 35.681], [138.769, 35.498]], ...(options ? { options } : {}) });
   });
@@ -52,6 +52,21 @@ describe('openrouteservice routing provider', () => {
     await calculateRoute(target, 'dummy', fetcher);
     const geocodeQueries = fetcher.mock.calls.slice(0, 2).map(([url]) => new URL(url).searchParams.get('text'));
     expect(geocodeQueries).toContain('スターバックス 渋谷駅周辺');
+  });
+  it('Maps queryを検索に使いながら候補はplace名と照合する', async () => {
+    const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps?query=%E6%9D%B1%E4%BA%AC%E9%A7%85%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%8D%83%E4%BB%A3%E7%94%B0%E5%8C%BA';
+    const fetcher = vi.fn(async (request: URL | RequestInfo) => {
+      const url = String(request);
+      if (url === ORS_DIRECTIONS_URL) return directions();
+      const text = new URL(url).searchParams.get('text');
+      if (text === '東京駅 東京都千代田区') return Response.json({ features: [{
+        geometry: { coordinates: [139.767, 35.681] }, properties: { name: '東京駅', confidence: 0.9 },
+      }] });
+      return geocode(138.769, 35.498);
+    });
+    await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({
+      status: 'ok', locationResolution: { before: 'google_maps_query_geocoding' },
+    });
   });
   it('Maps URLを解決できなければ通常の地点名geocodingとして記録する', async () => {
     const target = input(); target.before.googleMapsUrl = 'https://maps.app.goo.gl/expired';
