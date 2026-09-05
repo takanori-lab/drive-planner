@@ -81,8 +81,8 @@ describe('Drive Planner Worker', () => {
     const ai = env.AI_RATE_LIMITER as FakeRateLimiter;
     const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [139.7, 35.6] }, properties: { confidence: 0.9 } }] }))
-      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [138.7, 35.5] }, properties: { confidence: 0.9 } }] }))
+      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [139.7, 35.6] }, properties: { name: body.before.name, confidence: 0.9 } }] }))
+      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [138.7, 35.5] }, properties: { name: body.after.name, confidence: 0.9 } }] }))
       .mockResolvedValueOnce(Response.json({ routes: [{ summary: { distance: 1000, duration: 600 } }] }));
     const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
     expect(response.status).toBe(200);
