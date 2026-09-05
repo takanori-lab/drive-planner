@@ -61,14 +61,21 @@ describe('ORS/Pelias地点解決fallback', () => {
   });
 
   it.each([
-    ['京都府京都市', '京都府', '京都市', null],
-    ['丸の内口（東京都千代田区）', '東京都', '千代田区', null],
-    ['千葉県千葉市中央区', '千葉県', '千葉市', '中央区'],
-  ])('住所メモ %s から行政区画だけを抽出する', async (note, region, locality, borough) => {
+    ['京都府京都市', '京都府', null, '京都市', null],
+    ['東京都千代田区', '東京都', null, '千代田区', null],
+    ['千葉県千葉市中央区', '千葉県', null, '千葉市', '中央区'],
+    ['山梨県南都留郡富士河口湖町', '山梨県', '南都留郡', '富士河口湖町', null],
+    ['三重県四日市市', '三重県', null, '四日市市', null],
+    ['長野県大町市', '長野県', null, '大町市', null],
+    ['千葉県市川市市川1丁目', '千葉県', null, '市川市', null],
+    ['福島県郡山市', '福島県', null, '郡山市', null],
+    ['愛知県蒲郡市', '愛知県', null, '蒲郡市', null],
+  ])('住所メモ %s から行政区画だけを抽出する', async (note, region, county, locality, borough) => {
     const fetcher = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response()).mockResolvedValueOnce(response());
     await geocodePlace('テスト地点', note, 'place_geocoding', 'key', fetcher);
     const url = new URL(fetcher.mock.calls[2][0]);
     expect(url.searchParams.get('region')).toBe(region);
+    expect(url.searchParams.get('county')).toBe(county);
     expect(url.searchParams.get('locality')).toBe(locality);
     expect(url.searchParams.get('borough')).toBe(borough);
   });

@@ -28,6 +28,26 @@ const PREFECTURES = [
   '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
 ] as const;
 
+const ADMIN_SUFFIXES = ['市', '区', '町', '村'] as const;
+
+function municipalityPrefix(value: string): string | undefined {
+  const endings = ADMIN_SUFFIXES.map((suffix) => ({ suffix, index: value.indexOf(suffix, 1) }));
+  // A city name can contain 町/村 (大町市), and a city precedes its ward.
+  // Prefer those structural terminators before considering a standalone town
+  // or village suffix.
+  const first = endings.find(({ suffix, index }) => suffix === '市' && index >= 1)
+    ?? endings.find(({ suffix, index }) => suffix === '区' && index >= 1)
+    ?? endings.filter(({ index }) => index >= 1).sort((a, b) => a.index - b.index)[0];
+  if (!first) return undefined;
+  let end = first.index + 1;
+  const stem = value.slice(0, first.index);
+  // Administrative suffix characters can themselves be the last character of
+  // a name (四日市市). Do not extend when the following address instead repeats
+  // the municipality stem (市川市市川1丁目).
+  if (value[end] === first.suffix && !value.slice(end).startsWith(stem)) end += 1;
+  return value.slice(0, end);
+}
+
 function administrativeParts(note: string): { region?: string; county?: string; localities: string[]; boroughs: string[] } {
   const region = PREFECTURES.find((prefecture) => note.includes(prefecture));
   const segments = (region ? note.slice(note.indexOf(region) + region.length) : note)
@@ -37,24 +57,24 @@ function administrativeParts(note: string): { region?: string; county?: string; 
   let county: string | undefined;
   for (const segment of segments) {
     let remainder = segment;
-    const countyMatch = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+?郡)/);
-    if (countyMatch) {
-      county = countyMatch[1];
-      remainder = remainder.slice(countyMatch[1].length);
+    // A 郡 is a county only when it has a meaningful name and is followed by a
+    // municipality. This prevents city names such as 郡山市 and 蒲郡市 from
+    // being split merely because they contain the same suffix character.
+    const countyEnd = remainder.indexOf('郡', 2);
+    const possibleCounty = countyEnd >= 2 ? remainder.slice(0, countyEnd + 1) : undefined;
+    if (possibleCounty && municipalityPrefix(remainder.slice(possibleCounty.length))) {
+      county = possibleCounty;
+      remainder = remainder.slice(possibleCounty.length);
     }
     while (remainder) {
-      // Use the last applicable suffix, since the suffix character can also be
-      // part of the municipality name (四日市市, 大町市). A city followed by a
-      // ward is handled first so the ward remains available for the next pass.
-      const city = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+市)(?=[一-龠々ヶぁ-んァ-ヶー]+区)/)
-        ?? remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+市)/);
-      const match = city ?? remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+区)/)
-        ?? remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+[町村])/);
-      if (!match) break;
-      const part = match[1];
+      // Consume one typed administrative component at a time; the helper
+      // distinguishes suffix characters inside a name from following address
+      // text, and leaves a city ward for the next pass.
+      const part = municipalityPrefix(remainder);
+      if (!part) break;
       if (part.endsWith('区') && localities.some((locality) => locality.endsWith('市'))) boroughs.push(part);
       else localities.push(part);
-      remainder = remainder.slice(match[1].length);
+      remainder = remainder.slice(part.length);
     }
   }
   return { region, county, localities, boroughs };
