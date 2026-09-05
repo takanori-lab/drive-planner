@@ -26,7 +26,7 @@ const PREFECTURES = [
   '鹿児島県', '沖縄県',
 ] as const;
 const ACCEPTED_LAYERS = new Set(['venue', 'address', 'street', 'station', 'locality', 'neighbourhood']);
-const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-ー_()（）]/g, '');
+const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-_()（）]/g, '');
 const explicitPrefecture = (note: string) => PREFECTURES.find((prefecture) => note.includes(prefecture));
 
 function chooseFeature(features: Feature[], canonicalName: string, prefecture?: string): { feature?: Feature; ambiguous: boolean } {

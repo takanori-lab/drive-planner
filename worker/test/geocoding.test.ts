@@ -60,6 +60,15 @@ describe('ORS/Pelias地点解決fallback', () => {
     await expect(run(geocode(name), fetcher)).resolves.toBeNull();
   });
 
+  it('長音記号を意味のある文字として維持して地点名を完全一致判定する', async () => {
+    const wrong = vi.fn().mockImplementation(async () => response(feature('スパ', 139, 35)));
+    await expect(run(geocode('スーパー'), wrong)).resolves.toBeNull();
+
+    const exact = vi.fn().mockResolvedValue(response(feature('スーパー', 139, 35)));
+    await expect(run(geocode('スーパー'), exact)).resolves.toMatchObject({ longitude: 139, latitude: 35 });
+    expect(exact).toHaveBeenCalledOnce();
+  });
+
   it('structured fallbackは都道府県だけを地域構造として送る', async () => {
     const fetcher = vi.fn().mockImplementation(async () => response());
     await expect(run(geocode('勝浦駅', '勝浦駅', '千葉県勝浦市'), fetcher)).resolves.toBeNull();
