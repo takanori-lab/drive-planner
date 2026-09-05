@@ -27,16 +27,25 @@ const PREFECTURES = [
 ] as const;
 const ACCEPTED_LAYERS = new Set(['venue', 'address', 'street', 'station', 'locality', 'neighbourhood']);
 const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-_()（）]/g, '');
-const explicitPrefecture = (note: string) => PREFECTURES.find((prefecture) => note.includes(prefecture));
+const explicitPrefecture = (...values: string[]) => PREFECTURES.find((prefecture) => values.some((value) => value.includes(prefecture)));
+
+function nameMatches(properties: NonNullable<Feature['properties']>, canonicalName: string, prefecture?: string): boolean {
+  const wantedName = normalize(canonicalName);
+  const featureName = normalize(properties.name);
+  if (featureName === wantedName) return true;
+  // A qualified user/Maps name can put the prefecture before or after the bare
+  // Pelias feature name. Only relax exact matching when that explicit context
+  // is also verified against the feature's region below.
+  return Boolean(prefecture && featureName && (wantedName.startsWith(featureName) || wantedName.endsWith(featureName)));
+}
 
 function chooseFeature(features: Feature[], canonicalName: string, prefecture?: string): { feature?: Feature; ambiguous: boolean } {
-  const wantedName = normalize(canonicalName);
   const candidates = features.filter((feature) => {
     const properties = feature.properties ?? {};
     const coordinates = feature.geometry?.coordinates;
     if (!coordinates || coordinates.length < 2 || !coordinates.every(Number.isFinite)) return false;
     if ((properties.confidence ?? 0) < 0.7) return false;
-    if (normalize(properties.name) !== wantedName) return false;
+    if (!nameMatches(properties, canonicalName, prefecture)) return false;
     if (properties.layer && !ACCEPTED_LAYERS.has(properties.layer)) return false;
     if (prefecture) {
       const regionText = normalize([properties.region, properties.region_a, properties.label].filter(Boolean).join(' '));
@@ -44,8 +53,15 @@ function chooseFeature(features: Feature[], canonicalName: string, prefecture?: 
     }
     return true;
   });
-  // Result order and confidence do not safely disambiguate identically named places.
-  return { ...(candidates.length === 1 ? { feature: candidates[0] } : {}), ambiguous: candidates.length > 1 };
+  const deduplicated = new Map<string, Feature>();
+  for (const feature of candidates) {
+    const coordinates = feature.geometry!.coordinates!;
+    const key = `${normalize(feature.properties?.name)}:${coordinates[0].toFixed(5)},${coordinates[1].toFixed(5)}`;
+    if (!deduplicated.has(key)) deduplicated.set(key, feature);
+  }
+  const uniqueCandidates = [...deduplicated.values()];
+  // Result order and confidence do not safely disambiguate genuinely distinct places.
+  return { ...(uniqueCandidates.length === 1 ? { feature: uniqueCandidates[0] } : {}), ambiguous: uniqueCandidates.length > 1 };
 }
 
 function responseError(response: Response): ApiError {
@@ -75,12 +91,12 @@ export async function geocodePlace(
   const canonicalName = input.canonicalName.trim();
   const locationNote = input.locationNote.trim();
   if (!searchText || !canonicalName) return null;
-  const prefecture = explicitPrefecture(locationNote);
+  const prefecture = explicitPrefecture(locationNote, searchText, canonicalName);
   const normalText = [searchText, locationNote].filter(Boolean).join(' ');
   const steps: SearchStep[] = [{ method: normalMethod, structured: false, params: { text: normalText } }];
   if (normalText !== canonicalName) steps.push({ method: 'name_only_geocoding', structured: false, params: { text: canonicalName } });
   steps.push({ method: 'structured_geocoding', structured: true, params: {
-    venue: canonicalName, ...(prefecture ? { region: prefecture } : {}), country: '日本',
+    address: canonicalName, ...(prefecture ? { region: prefecture } : {}), country: '日本',
   } });
 
   for (const step of steps.slice(0, MAX_GEOCODING_REQUESTS)) {

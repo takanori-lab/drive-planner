@@ -51,6 +51,29 @@ describe('ORS/Pelias地点解決fallback', () => {
     expect(contextual).toHaveBeenCalledOnce();
   });
 
+  it('同じ地点の重複featureは曖昧な候補として扱わない', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(
+      feature('東京駅', 139.767, 35.681, { layer: 'station' }),
+      feature('東京駅', 139.767001, 35.681001, { layer: 'venue' }),
+    ));
+    await expect(run(geocode('東京駅'), fetcher)).resolves.toMatchObject({ longitude: 139.767 });
+  });
+
+  it('検索語の都道府県で同名候補を絞り込む', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(
+      feature('府中駅', 139.477, 35.672, { region: '東京都' }),
+      feature('府中駅', 133.236, 34.568, { region: '広島県' }),
+    ));
+    await expect(run(geocode('府中駅 東京都', '府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
+  });
+
+  it('都道府県付きの地点名をbare feature名と照合する', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('府中駅', 139.477, 35.672, {
+      label: '府中駅, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('東京都 府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
+  });
+
   it.each([
     ['東京駅', feature('東京駅ホテル', 139, 35)],
     ['勝浦駅', feature('勝浦', 140, 35, { layer: 'locality' })],
@@ -76,6 +99,8 @@ describe('ORS/Pelias地点解決fallback', () => {
     const structured = new URL(String(fetcher.mock.calls.at(-1)![0]));
     expect(`${structured.origin}${structured.pathname}`).toBe(ORS_STRUCTURED_GEOCODE_URL);
     expect(structured.searchParams.get('region')).toBe('千葉県');
+    expect(structured.searchParams.get('address')).toBe('勝浦駅');
+    expect(structured.searchParams.has('venue')).toBe(false);
     expect(structured.searchParams.has('county')).toBe(false);
     expect(structured.searchParams.has('locality')).toBe(false);
     expect(structured.searchParams.has('borough')).toBe(false);

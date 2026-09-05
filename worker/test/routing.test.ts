@@ -3,7 +3,7 @@ import { calculateRoute, ORS_DIRECTIONS_URL } from '../src/routing';
 
 const place = (name: string, googleMapsUrl = '') => ({ name, googleMapsUrl, locationNote: '', memo: '' });
 const input = (condition: 'recommended'|'local_roads' = 'recommended') => ({ requestId: 'route-1', condition, before: place('東京駅'), after: place('河口湖駅') });
-const geocode = (longitude: number, latitude: number, name = longitude < 139 ? '河口湖駅' : '東京駅') => Response.json({ features: [{ geometry: { coordinates: [longitude, latitude] }, properties: { name, label: name, layer: 'venue', confidence: 0.9 } }] });
+const geocode = (longitude: number, latitude: number, name = longitude < 139 ? '河口湖駅' : '東京駅', properties = {}) => Response.json({ features: [{ geometry: { coordinates: [longitude, latitude] }, properties: { name, label: name, layer: 'venue', confidence: 0.9, ...properties } }] });
 const directions = () => Response.json({ routes: [{ summary: { distance: 132800, duration: 6300 } }] });
 const routeFetcher = (beforeName = '東京駅') => vi.fn(async (request: URL | RequestInfo) => {
   const url = String(request);
@@ -63,10 +63,25 @@ describe('openrouteservice routing provider', () => {
   });
   it('qualified queryは検索に使うがfeature名の完全一致条件には使わない', async () => {
     const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps?query=%E6%9D%B1%E4%BA%AC%E9%A7%85%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%8D%83%E4%BB%A3%E7%94%B0%E5%8C%BA';
-    const fetcher = routeFetcher();
+    const fetcher = vi.fn(async (request: URL | RequestInfo) => {
+      const url = String(request);
+      if (url === ORS_DIRECTIONS_URL) return directions();
+      const text = new URL(url).searchParams.get('text') ?? '';
+      return text.includes('東京駅')
+        ? geocode(139.767, 35.681, '東京駅', { region: '東京都' })
+        : geocode(138.769, 35.498, '河口湖駅');
+    });
     await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({ status: 'ok' });
     expect(fetcher.mock.calls.map(([url]) => String(url)).filter((url) => url !== ORS_DIRECTIONS_URL)
       .map((url) => new URL(url).searchParams.get('text'))).toContain('東京駅 東京都千代田区');
+  });
+  it('query-only Maps URLはdisplay aliasではなくqueryで検証する', async () => {
+    const target = input(); target.before.name = '集合場所';
+    target.before.googleMapsUrl = 'https://www.google.com/maps?query=%E6%9D%B1%E4%BA%AC%E9%A7%85';
+    const fetcher = routeFetcher();
+    await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({
+      status: 'ok', locationResolution: { before: 'google_maps_query_geocoding' },
+    });
   });
   it('Maps URLを解決できない場合は通常place geocodingとして扱う', async () => {
     const target = input(); target.before.googleMapsUrl = 'https://example.com/not-maps';

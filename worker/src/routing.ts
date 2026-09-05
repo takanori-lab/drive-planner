@@ -45,7 +45,9 @@ export async function resolveLocation(place: PlaceInput, apiKey: string, fetcher
     const resolved = await resolveGoogleMapsUrl(place.googleMapsUrl, fetcher, Math.min(remainingMs, 3000));
     if (resolved?.latitude !== undefined && resolved.longitude !== undefined) return { latitude: resolved.latitude, longitude: resolved.longitude, method: 'google_maps_coordinates', confidence: 'exact' };
     if (resolved) {
-      canonicalName = (resolved.label || place.name).trim();
+      // A query-only Maps URL describes the destination more accurately than a
+      // user-facing alias, so use it for both lookup and result validation.
+      canonicalName = (resolved.label || resolved.query || place.name).trim();
       searchText = (resolved.label || resolved.query || place.name).trim();
       method = 'google_maps_query_geocoding';
     }
