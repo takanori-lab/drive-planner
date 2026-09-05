@@ -18,19 +18,41 @@ interface Feature {
 interface SearchStep { method: GeocodingMethod; structured: boolean; params: Record<string, string> }
 
 const PLACE_LAYERS = new Set(['venue', 'address', 'street', 'station', 'locality', 'neighbourhood']);
-const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-ー_()（）]/g, '');
+const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-_()（）]/g, '');
+
+const PREFECTURES = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県', '茨城県', '栃木県', '群馬県',
+  '埼玉県', '千葉県', '東京都', '神奈川県', '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県',
+  '岐阜県', '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県', '奈良県', '和歌山県',
+  '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県',
+  '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+] as const;
+
+function administrativeParts(note: string): { region?: string; localities: string[] } {
+  const region = PREFECTURES.find((prefecture) => note.includes(prefecture));
+  const segments = (region ? note.slice(note.indexOf(region) + region.length) : note)
+    .split(/[\s　,，、()（）]+/).filter(Boolean);
+  const localities: string[] = [];
+  for (const segment of segments) {
+    let remainder = segment;
+    while (remainder) {
+      const match = remainder.match(/^([一-龠々ヶぁ-んァ-ヶー]+?[市区町村])/);
+      if (!match) break;
+      localities.push(match[1]);
+      remainder = remainder.slice(match[1].length);
+    }
+  }
+  return { region, localities };
+}
 
 function contextParts(note: string): string[] {
-  const parts = new Set<string>();
-  for (const match of note.matchAll(/[^\s,，、]+?[都道府県]/g)) parts.add(match[0]);
-  for (const match of note.matchAll(/[^\s,，、都道府県]+?(?:市|区|町|村)/g)) parts.add(match[0]);
-  return [...parts].map(normalize).filter((part) => part.length >= 2);
+  const { region, localities } = administrativeParts(note);
+  return [region, ...localities].filter((part): part is string => Boolean(part)).map(normalize).filter((part) => part.length >= 2);
 }
 
 function structuredContext(note: string): { region?: string; locality?: string } {
-  const region = note.match(/[^\s,，、]+?[都道府県]/)?.[0];
-  const locality = note.match(/(?:[都道府県])?([^\s,，、都道府県]+?(?:市|区|町|村))/)?.[1];
-  return { region, locality };
+  const { region, localities } = administrativeParts(note);
+  return { region, locality: localities.join('') || undefined };
 }
 
 function chooseFeature(features: Feature[], name: string, note: string, strictContext: boolean): Feature | undefined {
@@ -51,10 +73,11 @@ function chooseFeature(features: Feature[], name: string, note: string, strictCo
       const matchingContext = wantedContext.filter((part) => contextText.includes(part)).length;
       if (strictContext && wantedContext.length > 0 && matchingContext !== wantedContext.length) return null;
       const placeBonus = !properties.layer || PLACE_LAYERS.has(properties.layer) ? 0.03 : -0.08;
-      return { feature, score: confidence + (candidateName === wantedName ? 0.12 : 0.06) + matchingContext * 0.08 + placeBonus - index * 0.001 };
+      return { feature, exactName: candidateName === wantedName,
+        score: confidence + 0.06 + matchingContext * 0.08 + placeBonus - index * 0.001 };
     })
-    .filter((candidate): candidate is { feature: Feature; score: number } => candidate !== null)
-    .sort((a, b) => b.score - a.score)[0]?.feature;
+    .filter((candidate): candidate is { feature: Feature; exactName: boolean; score: number } => candidate !== null)
+    .sort((a, b) => Number(b.exactName) - Number(a.exactName) || b.score - a.score)[0]?.feature;
 }
 
 function responseError(response: Response): ApiError {

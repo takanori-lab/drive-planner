@@ -53,6 +53,18 @@ describe('openrouteservice routing provider', () => {
     const geocodeQueries = fetcher.mock.calls.slice(0, 2).map(([url]) => new URL(url).searchParams.get('text'));
     expect(geocodeQueries).toContain('スターバックス 渋谷駅周辺');
   });
+  it('Maps URLを解決できなければ通常の地点名geocodingとして記録する', async () => {
+    const target = input(); target.before.googleMapsUrl = 'https://maps.app.goo.gl/expired';
+    const fetcher = vi.fn(async (request: URL | RequestInfo) => {
+      const url = String(request);
+      if (url === ORS_DIRECTIONS_URL) return directions();
+      if (url.startsWith('https://maps.app.goo.gl/')) return new Response('', { status: 404 });
+      return geocode(url.includes('%E6%9D%B1%E4%BA%AC') ? 139.767 : 138.769, 35.681);
+    });
+    await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({
+      locationResolution: { before: 'place_geocoding' },
+    });
+  });
   it('地点を解決できなければrouteを生成しない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => Response.json({ features: [] })); expect(await calculateRoute(input(), 'dummy', fetcher)).toMatchObject({ status: 'unresolved', unresolved: ['before', 'after'], locationResolution: { before: 'unresolved', after: 'unresolved' } });
   });
