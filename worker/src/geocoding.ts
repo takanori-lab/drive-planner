@@ -25,7 +25,9 @@ const PREFECTURES = [
   '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県',
   '鹿児島県', '沖縄県',
 ] as const;
-const ACCEPTED_LAYERS = new Set(['venue', 'address', 'street', 'station', 'locality', 'neighbourhood']);
+const ACCEPTED_LAYERS = new Set([
+  'venue', 'address', 'street', 'station', 'locality', 'localadmin', 'borough', 'county', 'neighbourhood',
+]);
 const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-_()（）]/g, '');
 const components = (value: string) => value.normalize('NFKC').split(/[\s　・･,，.。\-_()（）]+/).filter(Boolean);
 const prefectureComponent = (value: string) => PREFECTURES.find((prefecture) => components(value).includes(prefecture));
@@ -37,6 +39,20 @@ const addressPrefecture = (value: string) => PREFECTURES.find((prefecture) => co
   // suffix distinguishes `東京都府中市` from POI names such as `東京都市大学`.
   return /^.+?(?:郡|市|区|町|村)/u.test(remainder);
 }));
+
+const verifiedQualifierParts = (qualifier: string): string[] => {
+  const normalizedQualifier = qualifier.normalize('NFKC');
+  const prefecture = PREFECTURES.find((candidate) => normalizedQualifier.startsWith(candidate));
+  if (!prefecture) return [normalizedQualifier];
+
+  const remainder = normalizedQualifier.slice(prefecture.length);
+  // Split only address-shaped administrative context. This lets metadata such
+  // as `府中市, 東京都` verify `東京都府中市` without treating a POI name like
+  // `東京都市大学` as a prefecture plus an arbitrary suffix.
+  return /^.+?(?:郡|市|区|町|村)(?:$|.+)/u.test(remainder)
+    ? [prefecture, remainder]
+    : [normalizedQualifier];
+};
 
 function explicitPrefecture(locationNote: string, searchText: string, canonicalName: string): typeof PREFECTURES[number] | undefined {
   // An explicitly separated location-note component wins over less
@@ -69,7 +85,10 @@ function nameMatches(properties: NonNullable<Feature['properties']>, canonicalNa
   // A qualified name may match a bare feature name only when every remaining
   // component is independently present in Pelias hierarchy/label metadata.
   // This deliberately avoids loose prefix/suffix matching.
-  const qualifiers = nameComponents.filter((_, index) => index !== matchingIndex).map(normalize);
+  const qualifiers = nameComponents
+    .filter((_, index) => index !== matchingIndex)
+    .flatMap(verifiedQualifierParts)
+    .map(normalize);
   return qualifiers.length > 0 && qualifiers.every((qualifier) => metadata.includes(qualifier))
     && (!prefecture || metadata.includes(normalize(prefecture)));
 }

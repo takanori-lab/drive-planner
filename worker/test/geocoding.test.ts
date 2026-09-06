@@ -67,6 +67,14 @@ describe('ORS/Pelias地点解決fallback', () => {
     await expect(run(geocode('府中駅 東京都', '府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
   });
 
+  it('検索語の連結された都道府県・市区町村をmetadataで個別に検証する', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('府中駅', 139.477, 35.672, {
+      label: '府中駅, 府中市, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('府中駅 東京都府中市', '府中駅 東京都府中市'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.477 });
+  });
+
   it('都道府県付きの地点名をbare feature名と照合する', async () => {
     const fetcher = vi.fn().mockResolvedValue(response(feature('府中駅', 139.477, 35.672, {
       label: '府中駅, 東京都', region: '東京都',
@@ -136,6 +144,14 @@ describe('ORS/Pelias地点解決fallback', () => {
   ])('%sに対する別地点・confidence不足を採用しない', async (name, wrong) => {
     const fetcher = vi.fn().mockImplementation(async () => response(wrong));
     await expect(run(geocode(name), fetcher)).resolves.toBeNull();
+  });
+
+  it.each(['localadmin', 'borough', 'county'])('%s layerの行政地点を完全一致なら採用する', async (layer) => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('府中市', 139.477, 35.668, {
+      layer, label: '府中市, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('府中市', '府中市', '東京都'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.477 });
   });
 
   it('長音記号を意味のある文字として維持して地点名を完全一致判定する', async () => {
