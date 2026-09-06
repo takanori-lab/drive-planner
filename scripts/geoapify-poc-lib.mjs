@@ -64,6 +64,7 @@ export class RequestPacer {
     const delayMs = Math.max(0, this.nextRequestAt - this.now())
     if (delayMs > 0) await this.sleep(delayMs)
     this.nextRequestAt = this.now() + this.intervalMs
+    return delayMs
   }
 }
 
@@ -78,41 +79,59 @@ export function retryAfterMs(value, now = Date.now()) {
 export async function requestGeoapify({
   query, api = 'search', apiKey, fetchImpl = fetch, pacer,
   maxRateLimitRetries = MAX_RATE_LIMIT_RETRIES, sleep = defaultSleep, now = Date.now,
+  measureNow = performance.now.bind(performance),
 }) {
-  const started = performance.now()
   const request = { ...DEFAULT_REQUEST }
   const url = new URL(`https://api.geoapify.com/v1/geocode/${api}`)
   url.search = new URLSearchParams({ text: query, ...request, apiKey }).toString()
   let status = null
   let rateLimitRetries = 0
+  let durationMs = 0
+  let waitDurationMs = 0
   while (true) {
     try {
-      if (pacer) await pacer.wait()
-      const response = await fetchImpl(url, { headers: { Accept: 'application/geo+json' } })
-      status = response.status
+      if (pacer) waitDurationMs += await pacer.wait()
+      status = null
+      const attemptStarted = measureNow()
+      let response
+      let payload
+      try {
+        response = await fetchImpl(url, { headers: { Accept: 'application/geo+json' } })
+        status = response.status
+        if (response.ok) payload = await response.json()
+      } finally {
+        durationMs += Math.max(0, measureNow() - attemptStarted)
+      }
       if (status === 429 && rateLimitRetries < maxRateLimitRetries) {
         const header = response.headers?.get?.('retry-after')
         const delayMs = retryAfterMs(header, now()) ?? 1000 * (rateLimitRetries + 1)
         rateLimitRetries += 1
         await sleep(delayMs)
+        waitDurationMs += delayMs
         continue
       }
-      if (status === 429) throw new Error(`Geoapify rate limit (HTTP 429) remained after ${rateLimitRetries} retries`)
+      if (status === 429) {
+        const finalDelayMs = retryAfterMs(response.headers?.get?.('retry-after'), now())
+        if (finalDelayMs !== null) {
+          await sleep(finalDelayMs)
+          waitDurationMs += finalDelayMs
+        }
+        throw new Error(`Geoapify rate limit (HTTP 429) remained after ${rateLimitRetries} retries`)
+      }
       if (!response.ok) throw new Error(`Geoapify returned HTTP ${response.status}`)
-      const payload = await response.json()
       const candidates = Array.isArray(payload?.features) ? payload.features.slice(0, request.limit).map(normalizeFeature) : []
-      return { query, api, request, count: candidates.length, candidates, durationMs: Math.round(performance.now() - started), status, rateLimitRetries, error: null }
+      return { query, api, request, count: candidates.length, candidates, durationMs: Math.round(durationMs), waitDurationMs, status, rateLimitRetries, error: null }
     } catch (error) {
-      return { query, api, request, count: 0, candidates: [], durationMs: Math.round(performance.now() - started), status, rateLimitRetries,
+      return { query, api, request, count: 0, candidates: [], durationMs: Math.round(durationMs), waitDurationMs, status, rateLimitRetries,
         error: redactSecret(error instanceof Error ? error.message : String(error), apiKey) }
     }
   }
 }
 
-export async function runCases({ cases = CASES, apiKey, fetchImpl = fetch, pacer = new RequestPacer(), onResult } = {}) {
+export async function runCases({ cases = CASES, apiKey, fetchImpl = fetch, pacer = new RequestPacer(), requestOptions = {}, onResult } = {}) {
   const results = []
   for (const testCase of cases) {
-    const result = await requestGeoapify({ ...testCase, apiKey, fetchImpl, pacer })
+    const result = await requestGeoapify({ ...requestOptions, ...testCase, apiKey, fetchImpl, pacer })
     results.push(result)
     onResult?.(result, results.length, cases.length)
   }
@@ -145,6 +164,7 @@ export function createMarkdown(results, cases = CASES, generatedAt = new Date().
     lines.push(`### ${i + 1}. ${c.category}: ${result.query}`, '',
       `- API種別: \`${result.api}\``, `- request条件: \`${JSON.stringify(result.request)}\``,
       `- HTTP status / duration / 結果件数: ${result.status ?? '-'} / ${result.durationMs} ms / ${result.count}`,
+      `- Pacing / backoff待ち時間: ${result.waitDurationMs ?? 0} ms`,
       `- Rate limit retry回数: ${result.rateLimitRetries ?? 0}`,
       `- 目的地点: 自動補助順位 **${findExpectedRank(c, result.candidates) ?? '未検出／要確認'}**（期待語: ${c.expected.join('・')}）`,
       `- Routing用座標: **${yn(result.candidates.some(x => x.latitude !== null && x.longitude !== null))}**`,

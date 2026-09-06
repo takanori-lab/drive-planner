@@ -25,7 +25,7 @@ unset GEOAPIFY_API_KEY
 - 共通条件は`text=<query>`、`lang=ja`、`filter=countrycode:jp`、`limit=5`です。日本語表示、国内限定、上位5候補の比較というIssue #64の目的に直接対応します。
 - `format`は指定せず、GeoJSONの`features[].properties`とgeometryを評価します。`bias`は実利用時の現在地等が未定で順位へ影響するため、この基準測定では指定しません。
 - Places APIや独自fallbackは使いません。SearchとAutocompleteそのものの適性を分離して判断するためです。
-- Free plan等の5 requests/sec制限を安全に下回るため、すべてのrequest開始を250ms以上空けます。HTTP 429では`Retry-After`（秒数またはHTTP-date）を尊重し、最大2回だけ再試行します。解消しない429は0件の検索品質失敗ではなく、rate limit errorとretry回数として記録して次のケースへ進みます。
+- Free plan等の5 requests/sec制限を安全に下回るため、すべてのrequest開始を250ms以上空けます。HTTP 429では`Retry-After`（秒数またはHTTP-date）を尊重し、最大2回だけ再試行します。最後の429に指定されたcooldownも次ケースの前に適用します。解消しない429は0件の検索品質失敗ではなく、rate limit errorとretry回数として記録して次のケースへ進みます。
 
 上記は2026年9月にGeoapify公式の[Forward Geocoding API](https://apidocs.geoapify.com/docs/geocoding/forward-geocoding/)と[Address Autocomplete API](https://apidocs.geoapify.com/docs/geocoding/address-autocomplete/)の仕様を確認する前提の固定条件です。実API実行前に、契約プランを含む最新仕様も再確認してください。
 
@@ -35,7 +35,7 @@ unset GEOAPIFY_API_KEY
 
 ## レポートの読み方と合格基準への対応
 
-各ケースにquery、API種別、キーを除くrequest条件、HTTP status、duration、件数、上位5候補の名称・住所・行政区・座標・地点種別・provider identifier、errorを記録します。
+各ケースにquery、API種別、キーを除くrequest条件、HTTP status、duration、件数、上位5候補の名称・住所・行政区・座標・地点種別・provider identifier、errorを記録します。`durationMs`はpacingとbackoffを除いたAPI通信時間の合計で、待機は`waitDurationMs`として分離します。
 
 | 判断項目 | レポート上の確認方法 | 判定方法 |
 |---|---|---|

@@ -47,6 +47,16 @@ describe('Geoapify PoC', () => {
     expect(sleep).toHaveBeenCalledWith(250)
   })
 
+  it('pacing待ち時間を通信durationへ含めない', async () => {
+    const times = [100, 125]
+    const result = await requestGeoapify({
+      query: '東京駅', apiKey: 'secret', pacer: { wait: async () => 1000 },
+      measureNow: () => times.shift(),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ features: [] }) }),
+    })
+    expect(result).toMatchObject({ durationMs: 25, waitDurationMs: 1000 })
+  })
+
   it('429のRetry-Afterを尊重してbounded retryする', async () => {
     const sleep = vi.fn(async () => {})
     const fetchImpl = vi.fn()
@@ -58,19 +68,32 @@ describe('Geoapify PoC', () => {
     expect(result).toMatchObject({ status: 200, count: 1, rateLimitRetries: 1, error: null })
   })
 
-  it('retry上限後はrate limit errorを記録し後続ケースを継続する', async () => {
+  it('429後のnetwork errorに古いHTTP statusを残さない', async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => '0' } })
-      .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => '0' } })
-      .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => '0' } })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ features: [feature] }) })
+      .mockRejectedValueOnce(new Error('connection failed'))
+    const result = await requestGeoapify({ query: '東京駅', apiKey: 'secret', fetchImpl, sleep: async () => {} })
+    expect(result).toMatchObject({ status: null, count: 0, rateLimitRetries: 1, error: 'connection failed' })
+  })
+
+  it('retry上限後はrate limit errorを記録し後続ケースを継続する', async () => {
+    let clock = 0
+    const starts = []
+    const fetchImpl = vi.fn()
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '0' } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '0' } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '2' } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: true, status: 200, json: async () => ({ features: [feature] }) } })
     const results = await runCases({
       cases: [{ query: '制限対象', expected: [] }, { query: '後続', expected: [] }], apiKey: 'secret', fetchImpl,
       pacer: new RequestPacer({ intervalMs: 0 }),
+      requestOptions: { now: () => clock, sleep: async ms => { clock += ms } },
     })
     expect(results[0]).toMatchObject({ status: 429, count: 0, rateLimitRetries: 2 })
     expect(results[0].error).toContain('rate limit')
     expect(results[1]).toMatchObject({ status: 200, count: 1, error: null })
     expect(fetchImpl).toHaveBeenCalledTimes(4)
+    expect(starts).toEqual([0, 0, 0, 2000])
+    expect(results[0].waitDurationMs).toBe(2000)
   })
 })
