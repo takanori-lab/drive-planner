@@ -89,6 +89,21 @@ describe('ORS/Pelias地点解決fallback', () => {
     await expect(run(geocode('東京都府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
   });
 
+  it('区切りのない都道府県・市区町村付き地点名もmetadataで個別に検証する', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('府中駅', 139.477, 35.672, {
+      label: '府中駅, 府中市, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('東京都府中市府中駅'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.477 });
+  });
+
+  it('区切りのない地点名の市区町村qualifierがmetadataになければ採用しない', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => response(feature('府中駅', 133.236, 34.568, {
+      label: '府中駅, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('東京都府中市府中駅'), fetcher)).resolves.toBeNull();
+  });
+
   it('canonical nameの未検証部分を無視して無関係なfeatureを採用しない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => response(feature('南口', 139.9, 35.9, {
       label: '南口, 東京都', region: '東京都',

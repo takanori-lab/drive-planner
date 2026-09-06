@@ -69,13 +69,15 @@ function nameMatches(properties: NonNullable<Feature['properties']>, canonicalNa
   if (!featureName) return false;
 
   const metadata = normalize([properties.region, properties.region_a, properties.label].filter(Boolean).join(' '));
-  // Japanese qualified names commonly omit whitespace (for example,
-  // `東京都府中駅`). Relax equality only for a recognized prefecture prefix,
-  // and only after both the remaining name and the feature hierarchy verify it.
-  const prefixedPrefecture = PREFECTURES.find((candidate) => canonicalName.normalize('NFKC').startsWith(candidate));
-  if (prefixedPrefecture) {
-    const remainder = canonicalName.normalize('NFKC').slice(prefixedPrefecture.length);
-    if (normalize(remainder) === featureName && metadata.includes(normalize(prefixedPrefecture))) return true;
+  // Japanese administrative qualifiers commonly omit whitespace (for example,
+  // `東京都府中市府中駅`). When the exact feature name is the suffix, split the
+  // preceding address-shaped qualifier and require every part to be independently
+  // present in the feature hierarchy. This does not permit loose substring matches.
+  if (wantedName.endsWith(featureName)) {
+    const qualifier = wantedName.slice(0, -featureName.length);
+    const qualifiers = verifiedQualifierParts(qualifier).map(normalize).filter(Boolean);
+    if (qualifiers.length > 0 && qualifiers.every((part) => metadata.includes(part))
+      && (!prefecture || metadata.includes(normalize(prefecture)))) return true;
   }
 
   const nameComponents = components(canonicalName);
