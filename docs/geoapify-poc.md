@@ -26,6 +26,7 @@ unset GEOAPIFY_API_KEY
 - `format`は指定せず、GeoJSONの`features[].properties`とgeometryを評価します。`bias`は実利用時の現在地等が未定で順位へ影響するため、この基準測定では指定しません。
 - Places APIや独自fallbackは使いません。SearchとAutocompleteそのものの適性を分離して判断するためです。
 - Free plan等の5 requests/sec制限を安全に下回るため、すべてのrequest開始を250ms以上空けます。HTTP 429では`Retry-After`（秒数またはHTTP-date）を尊重し、最大2回だけ再試行します。最後の429でも次ケースの前に必ずcooldownし、`Retry-After`がない、または不正な場合は既存backoffと同じ段階式のfallback（最終attemptでは3秒）を適用します。解消しない429は0件の検索品質失敗ではなく、rate limit errorとretry回数として記録して次のケースへ進みます。
+- 各requestにはNode.js標準の`AbortSignal.timeout`で10秒のtimeoutを適用します。応答が停止したケースはerrorとして記録し、後続ケースの測定を継続します。
 
 上記は2026年9月にGeoapify公式の[Forward Geocoding API](https://apidocs.geoapify.com/docs/geocoding/forward-geocoding/)と[Address Autocomplete API](https://apidocs.geoapify.com/docs/geocoding/address-autocomplete/)の仕様を確認する前提の固定条件です。実API実行前に、契約プランを含む最新仕様も再確認してください。
 
@@ -49,4 +50,4 @@ unset GEOAPIFY_API_KEY
 
 ## テスト方針
 
-`npm test`ではmockした`fetch`だけを使用し、実Geoapify APIやquotaを消費しません。レスポンス抽出、0件、HTTPエラー、秘密情報のredaction、Markdown生成に加え、request間隔、`Retry-After`、bounded retry、rate limit後の測定継続を検証します。実測はAPIキーを持つレビュー担当者が明示的に`npm run poc:geoapify`を実行してください。
+`npm test`ではmockした`fetch`だけを使用し、実Geoapify APIやquotaを消費しません。`categories`を含むレスポンス抽出、期待語のAND/OR条件、timeout、0件、HTTPエラー、秘密情報のredaction、Markdown生成に加え、request間隔、`Retry-After`、bounded retry、rate limit後の測定継続を検証します。実測はAPIキーを持つレビュー担当者が明示的に`npm run poc:geoapify`を実行してください。

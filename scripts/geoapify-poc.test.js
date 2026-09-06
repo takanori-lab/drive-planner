@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createMarkdown, normalizeFeature, RequestPacer, requestGeoapify, runCases } from './geoapify-poc-lib.mjs'
+import { createMarkdown, findExpectedRank, normalizeFeature, RequestPacer, requestGeoapify, runCases } from './geoapify-poc-lib.mjs'
 
-const feature = { properties: { name: '東京駅', formatted: '日本、東京都千代田区 東京駅', state: '東京都', city: '千代田区', lat: 35.681, lon: 139.767, result_type: 'amenity', category: 'public_transport.train', place_id: 'provider-id' } }
+const feature = { properties: { name: '東京駅', formatted: '日本、東京都千代田区 東京駅', state: '東京都', city: '千代田区', lat: 35.681, lon: 139.767, result_type: 'amenity', categories: ['public_transport.train', 'building.transportation'], place_id: 'provider-id' } }
 
 describe('Geoapify PoC', () => {
   it('レスポンスから候補項目を安全に抽出する', () => {
-    expect(normalizeFeature(feature)).toMatchObject({ name: '東京駅', prefecture: '東京都', city: '千代田区', latitude: 35.681, placeId: 'provider-id' })
+    expect(normalizeFeature(feature)).toMatchObject({ name: '東京駅', prefecture: '東京都', city: '千代田区', latitude: 35.681, category: 'public_transport.train, building.transportation', placeId: 'provider-id' })
     expect(normalizeFeature({ geometry: { coordinates: [139, 35] } })).toMatchObject({ name: '', latitude: 35, longitude: 139 })
+    expect(normalizeFeature({ properties: { categories: [null, 1, 'tourism'] } })).toMatchObject({ category: 'tourism' })
   })
 
   it('APIキーを結果やエラーへ含めない', async () => {
@@ -74,6 +75,31 @@ describe('Geoapify PoC', () => {
       .mockRejectedValueOnce(new Error('connection failed'))
     const result = await requestGeoapify({ query: '東京駅', apiKey: 'secret', fetchImpl, sleep: async () => {} })
     expect(result).toMatchObject({ status: null, count: 0, rateLimitRetries: 1, error: 'connection failed' })
+  })
+
+  it('timeoutをケースのerrorとして記録して後続ケースを継続する', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce((_url, { signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ features: [feature] }) })
+    const results = await runCases({
+      cases: [{ query: 'timeout', expected: [] }, { query: '後続', expected: [] }], apiKey: 'secret', fetchImpl,
+      pacer: new RequestPacer({ intervalMs: 0 }), requestOptions: { requestTimeoutMs: 5 },
+    })
+    expect(results[0]).toMatchObject({ status: null, count: 0 })
+    expect(results[0].error.toLowerCase()).toContain('timeout')
+    expect(results[1]).toMatchObject({ status: 200, count: 1, error: null })
+  })
+
+  it('期待語のAND条件と代替表記のOR条件を区別する', () => {
+    const candidates = [
+      { name: '三井アウトレットパーク 木更津', formatted: '千葉県木更津市' },
+      { name: '海ほたるパーキングエリア', formatted: '千葉県木更津市' },
+    ]
+    expect(findExpectedRank({ expected: ['三井アウトレットパーク', '木更津'] }, candidates)).toBe(1)
+    expect(findExpectedRank({ expected: ['三井アウトレットパーク', '横浜'] }, candidates)).toBeNull()
+    expect(findExpectedRank({ expected: { any: ['海ほたるPA', '海ほたるパーキングエリア'] } }, candidates)).toBe(2)
   })
 
   it.each([

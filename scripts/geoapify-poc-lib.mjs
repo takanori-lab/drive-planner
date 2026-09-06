@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 export const DEFAULT_REQUEST = Object.freeze({ lang: 'ja', filter: 'countrycode:jp', limit: 5 })
 export const REQUEST_INTERVAL_MS = 250
 export const MAX_RATE_LIMIT_RETRIES = 2
+export const REQUEST_TIMEOUT_MS = 10_000
 
 export const CASES = Object.freeze([
   { category: '基本駅', query: '東京駅', expected: ['東京駅'] },
@@ -17,7 +18,7 @@ export const CASES = Object.freeze([
   { category: '観光地・広域地点', query: '大石公園', expected: ['大石公園'] },
   { category: '観光地・広域地点', query: '海ほたる', expected: ['海ほたる'] },
   { category: 'ドライブ向け施設', query: '道の駅どうし', expected: ['道の駅どうし'] },
-  { category: 'ドライブ向け施設', query: '海ほたるPA', expected: ['海ほたる', '海ほたるパーキングエリア'] },
+  { category: 'ドライブ向け施設', query: '海ほたるPA', expected: { any: ['海ほたるPA', '海ほたるパーキングエリア', '海ほたる'] } },
   { category: 'ドライブ向け施設', query: '成田国際空港', expected: ['成田国際空港'] },
   { category: 'ドライブ向け施設', query: '三井アウトレットパーク 木更津', expected: ['三井アウトレットパーク', '木更津'] },
   { category: '店舗名', query: 'スターバックス コーヒー SHIBUYA TSUTAYA店', expected: ['スターバックス', 'SHIBUYA TSUTAYA'], note: '著名繁華街の実在チェーン店舗を名称だけで識別できるか' },
@@ -25,7 +26,7 @@ export const CASES = Object.freeze([
   { category: '店舗名 + 地域名', query: 'さわやか 御殿場インター店', expected: ['さわやか', '御殿場インター'], note: 'ドライブ中に検索されやすい地域限定チェーンの実在店舗' },
   { category: '日本語住所', query: '東京都千代田区丸の内1丁目9番1号', expected: ['東京駅', '丸の内'] },
   { category: '市区町村 + 地点名', query: '山梨県南都留郡富士河口湖町 大石公園', expected: ['大石公園'] },
-  { category: '表記ゆれ', query: '海ほたるパーキングエリア', expected: ['海ほたる'] },
+  { category: '表記ゆれ', query: '海ほたるパーキングエリア', expected: { any: ['海ほたるパーキングエリア', '海ほたるPA', '海ほたる'] } },
   { category: '入力途中文字列', query: 'とうきょ', expected: ['東京'], api: 'autocomplete', note: 'ひらがなの入力途中' },
   { category: '入力途中文字列', query: '三井アウトレット 木更', expected: ['三井アウトレット', '木更津'], api: 'autocomplete', note: '施設名と地域名の入力途中' },
 ])
@@ -35,12 +36,13 @@ const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : n
 
 export function normalizeFeature(feature = {}) {
   const p = feature?.properties ?? {}
+  const categories = Array.isArray(p.categories) ? p.categories.filter(value => typeof value === 'string') : []
   return {
     name: safeText(p.name), formatted: safeText(p.formatted || p.address_line1),
     prefecture: safeText(p.state), city: safeText(p.city || p.county || p.municipality),
     latitude: finiteNumber(p.lat ?? feature?.geometry?.coordinates?.[1]),
     longitude: finiteNumber(p.lon ?? feature?.geometry?.coordinates?.[0]),
-    resultType: safeText(p.result_type), category: safeText(p.category),
+    resultType: safeText(p.result_type), category: categories.join(', '),
     placeId: safeText(p.place_id),
   }
 }
@@ -79,7 +81,7 @@ export function retryAfterMs(value, now = Date.now()) {
 export async function requestGeoapify({
   query, api = 'search', apiKey, fetchImpl = fetch, pacer,
   maxRateLimitRetries = MAX_RATE_LIMIT_RETRIES, sleep = defaultSleep, now = Date.now,
-  measureNow = performance.now.bind(performance),
+  measureNow = performance.now.bind(performance), requestTimeoutMs = REQUEST_TIMEOUT_MS,
 }) {
   const request = { ...DEFAULT_REQUEST }
   const url = new URL(`https://api.geoapify.com/v1/geocode/${api}`)
@@ -96,7 +98,10 @@ export async function requestGeoapify({
       let response
       let payload
       try {
-        response = await fetchImpl(url, { headers: { Accept: 'application/geo+json' } })
+        response = await fetchImpl(url, {
+          headers: { Accept: 'application/geo+json' },
+          signal: AbortSignal.timeout(requestTimeoutMs),
+        })
         status = response.status
         if (response.ok) payload = await response.json()
       } finally {
@@ -138,9 +143,23 @@ export async function runCases({ cases = CASES, apiKey, fetchImpl = fetch, pacer
 }
 
 export function findExpectedRank(testCase, candidates) {
-  const terms = testCase.expected ?? []
-  const index = candidates.findIndex(c => terms.every(term => `${c.name} ${c.formatted}`.toLocaleLowerCase('ja').includes(term.toLocaleLowerCase('ja'))))
+  const expected = Array.isArray(testCase.expected) ? { all: testCase.expected } : (testCase.expected ?? {})
+  const all = Array.isArray(expected.all) ? expected.all : []
+  const any = Array.isArray(expected.any) ? expected.any : []
+  const includes = (text, term) => typeof term === 'string' && text.includes(term.toLocaleLowerCase('ja'))
+  const index = candidates.findIndex(candidate => {
+    const text = `${candidate.name} ${candidate.formatted}`.toLocaleLowerCase('ja')
+    return all.every(term => includes(text, term)) && (any.length === 0 || any.some(term => includes(text, term)))
+  })
   return index < 0 ? null : index + 1
+}
+
+function describeExpected(expected) {
+  if (Array.isArray(expected)) return expected.join(' AND ')
+  const parts = []
+  if (Array.isArray(expected?.all) && expected.all.length) parts.push(expected.all.join(' AND '))
+  if (Array.isArray(expected?.any) && expected.any.length) parts.push(`(${expected.any.join(' OR ')})`)
+  return parts.join(' AND ') || '指定なし'
 }
 
 const escapeCell = value => String(value ?? '').replaceAll('|', '\\|').replaceAll('\n', '<br>')
@@ -165,7 +184,7 @@ export function createMarkdown(results, cases = CASES, generatedAt = new Date().
       `- HTTP status / duration / 結果件数: ${result.status ?? '-'} / ${result.durationMs} ms / ${result.count}`,
       `- Pacing / backoff待ち時間: ${result.waitDurationMs ?? 0} ms`,
       `- Rate limit retry回数: ${result.rateLimitRetries ?? 0}`,
-      `- 目的地点: 自動補助順位 **${findExpectedRank(c, result.candidates) ?? '未検出／要確認'}**（期待語: ${c.expected.join('・')}）`,
+      `- 目的地点: 自動補助順位 **${findExpectedRank(c, result.candidates) ?? '未検出／要確認'}**（期待語: ${describeExpected(c.expected)}）`,
       `- Routing用座標: **${yn(result.candidates.some(x => x.latitude !== null && x.longitude !== null))}**`,
       `- Error: ${escapeCell(result.error ?? 'なし')}`,
       `- 人間が確認: 目的地点の妥当性、候補を住所で区別可能か、日本語表示が十分か${c.note ? `（${c.note}）` : ''}`, '',
