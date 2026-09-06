@@ -17,12 +17,10 @@ const validSession = () => ({ token: 'valid-session-token', expiresAt: new Date(
 const candidate = (index) => ({ resultId: `result-${index}`, name: `候補${index}`, locationHint: '山梨県', description: '説明', reason: '理由', detourLevel: 'small', detourNote: '少し寄り道', checkItems: ['営業時間'] });
 
 describe('既存ドライブ編集UI', () => {
-  it('地点解決できなかった側の地点名を表示する', () => {
-    const html = renderToStaticMarkup(<Segment before={{ name: '千葉駅' }} after={{ name: '勝浦駅' }} candidates={[]}
-      routeResult={{ status: 'unresolved', unresolved: ['after'] }} condition="recommended" onCondition={() => undefined}
-      onAdd={() => undefined} onAsk={() => undefined} onEdit={() => undefined} onMove={() => undefined} onPromote={() => undefined} onDelete={() => undefined} />);
-    expect(html).toContain('勝浦駅を特定できません');
-    expect(html).not.toContain('千葉駅・勝浦駅を特定できません');
+  it('location未指定は警告を表示しない', () => {
+    const html = renderToStaticMarkup(<Segment before={{ name: '千葉駅' }} after={{ name: '勝浦駅' }} candidates={[]} condition="recommended" onCondition={() => undefined} onAdd={() => undefined} onAsk={() => undefined} onEdit={() => undefined} onMove={() => undefined} onPromote={() => undefined} onDelete={() => undefined} onSelectCandidateLocation={() => undefined} onClearCandidateLocation={() => undefined} />);
+    expect(html).not.toContain('特定できません');
+    expect(html).toContain('<span role="status"></span>');
   });
 
   it('現在値入りのドライブ情報編集Sheetを表示する', () => {

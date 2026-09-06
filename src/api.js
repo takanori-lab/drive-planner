@@ -1,4 +1,4 @@
-import { segmentKey } from './model';
+import { isValidLocation, segmentKey } from './model';
 
 export const API_BASE_URL = 'https://drive-planner-api.takanori-tanaka0517.workers.dev';
 export const SESSION_STORAGE_KEY = 'drive-planner:ai-session:v1';
@@ -97,7 +97,8 @@ export async function fetchAiCandidates(token, body, { fetchImpl = fetch, baseUr
 }
 
 export function buildRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {
-  return { requestId: createRequestId(), condition, before: placeForRequest(before), after: placeForRequest(after) };
+  if (!isValidLocation(before?.location) || !isValidLocation(after?.location)) throw new Error('経路計算には両端の有効な場所指定が必要です。');
+  return { requestId: createRequestId(), condition, before: before.location, after: after.location };
 }
 
 export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL, signal } = {}) {

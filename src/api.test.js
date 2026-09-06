@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAiRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { buildAiRequestBody, buildRoutingRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
 
 const plan = {
   title: 'テスト旅行',
@@ -80,5 +80,13 @@ it('429のRetry-Afterを再試行待機時間として保持する', async () =>
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'error', error: { code: 'rate_limited', retryable: true } }), {
     status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
   }));
-  await expect(fetchSegmentRoute({}, {}, 'recommended', { fetchImpl })).rejects.toMatchObject({ retryAfterMs: 60_000 });
+  await expect(fetchSegmentRoute({ location: { latitude: 35, longitude: 139 } }, { location: { latitude: 36, longitude: 140 } }, 'recommended', { fetchImpl })).rejects.toMatchObject({ retryAfterMs: 60_000 });
+});
+
+it('routing requestにはユーザー指定座標だけを入れる', () => {
+  const before = { name: '東京駅', googleMapsUrl: 'https://example.test', locationNote: '丸の内', location: { latitude: 35.681, longitude: 139.767 } };
+  const after = { name: '勝浦駅', location: { latitude: 35.153, longitude: 140.312 } };
+  expect(buildRoutingRequestBody(before, after, 'recommended', () => 'request')).toEqual({ requestId: 'request', condition: 'recommended', before: before.location, after: after.location });
+  expect(() => buildRoutingRequestBody({ ...before, location: null }, after, 'recommended')).toThrow();
+  expect(() => buildRoutingRequestBody(before, { ...after, location: { latitude: 35, longitude: 181 } }, 'recommended')).toThrow();
 });

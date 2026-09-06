@@ -17,13 +17,21 @@ export interface SegmentCandidatesRequest {
   existingCandidates: Array<{ name: string; locationNote: string }>;
   preferences: { freeText: string; useWebSearch: boolean };
 }
-export interface RoutingRequest { requestId: string; condition: 'recommended' | 'local_roads'; before: PlaceInput; after: PlaceInput }
+export interface CoordinateInput { latitude: number; longitude: number }
+export interface RoutingRequest { requestId: string; condition: 'recommended' | 'local_roads'; before: CoordinateInput; after: CoordinateInput }
 
 export function validateRoutingRequest(value: unknown): RoutingRequest {
   const root = object(value, 'body'); exactKeys(root, ['requestId', 'condition', 'before', 'after'], 'body');
   const condition = string(root.condition, 'condition', 20);
   if (condition !== 'recommended' && condition !== 'local_roads') invalid('condition は recommended または local_roads を指定してください。');
-  return { requestId: string(root.requestId, 'requestId', 100), condition, before: place(root.before, 'before'), after: place(root.after, 'after') };
+  return { requestId: string(root.requestId, 'requestId', 100), condition, before: coordinate(root.before, 'before'), after: coordinate(root.after, 'after') };
+}
+
+function coordinate(value: unknown, path: string): CoordinateInput {
+  const input = object(value, path); exactKeys(input, ['latitude', 'longitude'], path);
+  if (typeof input.latitude !== 'number' || !Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90) invalid(`${path}.latitude は -90 から 90 の有限値で指定してください。`);
+  if (typeof input.longitude !== 'number' || !Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180) invalid(`${path}.longitude は -180 から 180 の有限値で指定してください。`);
+  return { latitude: input.latitude, longitude: input.longitude };
 }
 
 function invalid(detail: string): never {
