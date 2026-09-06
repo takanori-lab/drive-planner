@@ -81,8 +81,8 @@ describe('Drive Planner Worker', () => {
     const ai = env.AI_RATE_LIMITER as FakeRateLimiter;
     const body = { requestId: 'route-request', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after };
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [139.7, 35.6] }, properties: { confidence: 0.9 } }] }))
-      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [138.7, 35.5] }, properties: { confidence: 0.9 } }] }))
+      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [139.7, 35.6] }, properties: { name: body.before.name, confidence: 0.9 } }] }))
+      .mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [138.7, 35.5] }, properties: { name: body.after.name, confidence: 0.9 } }] }))
       .mockResolvedValueOnce(Response.json({ routes: [{ summary: { distance: 1000, duration: 600 } }] }));
     const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
     expect(response.status).toBe(200);
@@ -90,6 +90,36 @@ describe('Drive Planner Worker', () => {
     expect(routingIp.keys).toEqual(['unknown']);
     expect(ai.keys).toEqual([]);
     expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('Directions失敗時も解決済み地点methodをrouting logへ保存する', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const statement: any = { bind: vi.fn(() => statement), run: vi.fn(async () => ({})) };
+    env.AI_LOGS_DB = { exec: vi.fn(async () => ({})), prepare: vi.fn(() => statement) };
+    const body = { requestId: 'route-request', condition: 'recommended',
+      before: { ...fixture().segment.before, googleMapsUrl: 'https://www.google.com/maps?q=35.681%2C139.767' },
+      after: { ...fixture().segment.after, googleMapsUrl: 'https://www.google.com/maps?q=35.498%2C138.769' } };
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env,
+      vi.fn().mockResolvedValue(new Response('', { status: 503 })));
+    expect(response.status).toBe(502);
+    expect(JSON.parse(statement.bind.mock.calls[0][8])).toEqual({
+      before: 'google_maps_coordinates', after: 'google_maps_coordinates',
+    });
+  });
+
+  it('片方のgeocoding失敗時も解決済み地点methodをrouting logへ保存する', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const statement: any = { bind: vi.fn(() => statement), run: vi.fn(async () => ({})) };
+    env.AI_LOGS_DB = { exec: vi.fn(async () => ({})), prepare: vi.fn(() => statement) };
+    const body = { requestId: 'route-request', condition: 'recommended',
+      before: { ...fixture().segment.before, googleMapsUrl: 'https://www.google.com/maps?q=35.681%2C139.767' },
+      after: fixture().segment.after };
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env,
+      vi.fn().mockResolvedValue(new Response('', { status: 503 })));
+    expect(response.status).toBe(502);
+    expect(JSON.parse(statement.bind.mock.calls[0][8])).toEqual({
+      before: 'google_maps_coordinates', after: 'unresolved',
+    });
   });
 
   it('routing rate limit超過時はORSを呼ばず429を返す', async () => {
