@@ -11,3 +11,6 @@ worker-configuration.d.ts
 
 # Geoapify PoC generated measurements (responses can change on every run)
 artifacts/geoapify-poc/
+
+# ORS/Pelias PoC generated measurements (responses can change on every run)
+artifacts/ors-pelias-poc/
