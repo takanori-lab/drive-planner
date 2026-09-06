@@ -104,7 +104,13 @@ export function buildRoutingRequestBody(before, after, condition, createRequestI
 }
 
 export function buildLegacyRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {
-  return { requestId: createRequestId(), condition, before: placeForRequest(before), after: placeForRequest(after) };
+  const placeForLegacyRouting = (place) => ({
+    ...placeForRequest(place),
+    googleMapsUrl: isValidLocation(place?.location)
+      ? `https://www.google.com/maps?q=${place.location.latitude},${place.location.longitude}`
+      : placeForRequest(place).googleMapsUrl,
+  });
+  return { requestId: createRequestId(), condition, before: placeForLegacyRouting(before), after: placeForLegacyRouting(after) };
 }
 
 export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL, signal } = {}) {

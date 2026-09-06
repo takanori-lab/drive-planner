@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildAiRequestBody, buildRoutingRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { extractGoogleMapsPlace } from '../worker/src/google-maps';
 
 const plan = {
   title: 'テスト旅行',
@@ -104,7 +105,12 @@ describe('Routing endpointのdeploy互換fallback', () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(new Response('', { status })).mockResolvedValueOnce(Response.json({ status: 'ok' }));
     await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
     expect(fetchImpl).toHaveBeenCalledTimes(2); expect(fetchImpl.mock.calls[1][0]).toBe('https://api.test/v1/routing/segment');
-    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).before).toEqual({ name: '東京駅', googleMapsUrl: 'https://maps.example/tokyo', locationNote: '丸の内', memo: '集合' });
+    const legacy = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(legacy.before).toEqual({ name: '東京駅', googleMapsUrl: 'https://www.google.com/maps?q=35.681,139.767', locationNote: '丸の内', memo: '集合' });
+    expect(legacy.after.googleMapsUrl).toBe('https://www.google.com/maps?q=35.153,140.312');
+    expect(extractGoogleMapsPlace(legacy.before.googleMapsUrl)).toMatchObject(before.location);
+    expect(extractGoogleMapsPlace(legacy.after.googleMapsUrl)).toMatchObject(after.location);
+    expect(before.googleMapsUrl).toBe('https://maps.example/tokyo'); expect(after.googleMapsUrl).toBe('');
   });
   it.each([400, 429, 500, 503])('v2がHTTP %sならv1へfallbackしない', async (status) => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'error', error: { code: 'routing_unavailable' } }), { status, headers: { 'Content-Type': 'application/json' } }));
