@@ -18,8 +18,8 @@ describe('ORS/Pelias地点解決fallback', () => {
   });
 
   it.each([
-    ['千葉駅', '千葉県千葉市中央区', 140.113, 35.613],
-    ['勝浦駅', '千葉県勝浦市', 140.312, 35.153],
+    ['千葉駅', '千葉県 千葉市中央区', 140.113, 35.613],
+    ['勝浦駅', '千葉県 勝浦市', 140.312, 35.153],
   ])('%sは通常検索0件の後にname-only fallbackで都道府県に合う候補を解決する', async (name, note, longitude, latitude) => {
     const fetcher = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response(
       feature(name, 135, 34, { label: `${name}, 大阪府`, region: '大阪府' }),
@@ -74,6 +74,13 @@ describe('ORS/Pelias地点解決fallback', () => {
     await expect(run(geocode('東京都 府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
   });
 
+  it('区切りのない都道府県付き地点名もmetadataで検証して照合する', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('府中駅', 139.477, 35.672, {
+      label: '府中駅, 東京都', region: '東京都',
+    })));
+    await expect(run(geocode('東京都府中駅'), fetcher)).resolves.toMatchObject({ longitude: 139.477 });
+  });
+
   it('canonical nameの未検証部分を無視して無関係なfeatureを採用しない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => response(feature('南口', 139.9, 35.9, {
       label: '南口, 東京都', region: '東京都',
@@ -86,6 +93,14 @@ describe('ORS/Pelias地点解決fallback', () => {
       label: '東京都市大学 横浜キャンパス, 神奈川県', region: '神奈川県',
     })));
     await expect(run(geocode('東京都市大学 横浜キャンパス', '東京都市大学 横浜キャンパス', '神奈川県'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.58 });
+  });
+
+  it('locationNote内のPOI名prefixを都道府県として扱わない', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('目的地', 139.58, 35.49, {
+      label: '目的地, 神奈川県', region: '神奈川県',
+    })));
+    await expect(run(geocode('目的地', '目的地', '東京都市大学 横浜キャンパス'), fetcher))
       .resolves.toMatchObject({ longitude: 139.58 });
   });
 
@@ -118,7 +133,7 @@ describe('ORS/Pelias地点解決fallback', () => {
 
   it('structured fallbackは都道府県だけを地域構造として送る', async () => {
     const fetcher = vi.fn().mockImplementation(async () => response());
-    await expect(run(geocode('勝浦駅', '勝浦駅', '千葉県勝浦市'), fetcher)).resolves.toBeNull();
+    await expect(run(geocode('勝浦駅', '勝浦駅', '千葉県 勝浦市'), fetcher)).resolves.toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(MAX_GEOCODING_REQUESTS);
     const structured = new URL(String(fetcher.mock.calls.at(-1)![0]));
     expect(`${structured.origin}${structured.pathname}`).toBe(ORS_STRUCTURED_GEOCODE_URL);

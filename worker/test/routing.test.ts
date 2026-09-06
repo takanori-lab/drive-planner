@@ -88,6 +88,13 @@ describe('openrouteservice routing provider', () => {
     const fetcher = routeFetcher();
     await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({ locationResolution: { before: 'place_geocoding' } });
   });
+  it('Maps URLにlabelもqueryもない場合は通常place geocodingとして扱う', async () => {
+    const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps';
+    const fetcher = routeFetcher();
+    await expect(calculateRoute(target, 'dummy', fetcher)).resolves.toMatchObject({
+      status: 'ok', locationResolution: { before: 'place_geocoding' },
+    });
+  });
   it('URLのテキストqueryにlocationNoteを加えてgeocodingする', async () => {
     const target = input(); target.before.googleMapsUrl = 'https://www.google.com/maps?query=%E3%82%B9%E3%82%BF%E3%83%BC%E3%83%90%E3%83%83%E3%82%AF%E3%82%B9'; target.before.locationNote = '渋谷駅周辺';
     const fetcher = routeFetcher('スターバックス');
