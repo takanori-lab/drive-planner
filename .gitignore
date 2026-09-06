@@ -8,3 +8,6 @@ worker-configuration.d.ts
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+
+# Geoapify PoC generated measurements (responses can change on every run)
+artifacts/geoapify-poc/
