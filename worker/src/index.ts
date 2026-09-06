@@ -1,11 +1,12 @@
 import { ApiError, errorResponse } from './errors';
-import { MAX_BODY_BYTES, validateRoutingRequest, validateSegmentCandidatesRequest } from './validation';
+import { MAX_BODY_BYTES, validateLegacyRoutingRequest, validateRoutingRequest, validateSegmentCandidatesRequest } from './validation';
 import { createSessionToken, passcodeMatches, verifySessionToken } from './auth';
 import { generateCandidates } from './openai';
 import { resolveRequestGoogleMaps } from './google-maps';
 import { exportAiLogs, saveAiGenerationLog, type D1Database } from './ai-logs';
 import { ADMIN_PAGE } from './admin-page';
 import { calculateRoute, type RoutingFailure } from './routing';
+import { calculateLegacyRoute, type RoutingFailure as LegacyRoutingFailure } from './legacy-routing';
 import { saveRoutingLog } from './routing-logs';
 
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
@@ -144,7 +145,7 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       return Response.json({ token: session.token, expiresAt: new Date(session.claims.expiresAt * 1000).toISOString() }, { headers });
     }
 
-    if (url.pathname === '/v1/routing/segment') {
+    if (url.pathname === '/v1/routing/segment' || url.pathname === '/v2/routing/segment') {
       if (request.method === 'OPTIONS') return preflight(request);
       if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'このHTTPメソッドは使用できません。');
       if (!allowedOrigin(request.headers.get('Origin'))) throw new ApiError(403, 'invalid_request', '許可されていないOriginです。');
@@ -152,15 +153,18 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
       const connectionKey = request.headers.get('CF-Connecting-IP') || 'unknown';
       if (!(await env.ROUTING_IP_RATE_LIMITER.limit({ key: connectionKey })).success) throw rateLimited();
       if (!(await env.ROUTING_RATE_LIMITER.limit({ key: SHARED_ROUTING_RATE_LIMIT_KEY })).success) throw rateLimited();
-      const input = validateRoutingRequest(await parseBody(request));
+      const legacy = url.pathname === '/v1/routing/segment';
+      const input = legacy ? validateLegacyRoutingRequest(await parseBody(request)) : validateRoutingRequest(await parseBody(request));
       if (!env?.ORS_API_KEY) throw new ApiError(500, 'routing_not_configured', '経路計算を利用できません。');
       let result;
       try {
-        result = await calculateRoute(input, env.ORS_API_KEY, fetcher, aiTimeoutMs);
+        result = legacy
+          ? await calculateLegacyRoute(input as ReturnType<typeof validateLegacyRoutingRequest>, env.ORS_API_KEY, fetcher, aiTimeoutMs)
+          : await calculateRoute(input as ReturnType<typeof validateRoutingRequest>, env.ORS_API_KEY, fetcher, aiTimeoutMs);
         if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, result); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
       } catch (error) {
         if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, null, error instanceof ApiError ? error.code : 'internal_error',
-          error instanceof Error ? (error as RoutingFailure).locationResolution : undefined); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
+          error instanceof Error ? ((error as RoutingFailure).locationResolution ?? (error as LegacyRoutingFailure).locationResolution) : undefined); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
         throw error;
       }
       return Response.json(result, { headers });

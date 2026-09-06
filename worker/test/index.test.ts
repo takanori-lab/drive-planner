@@ -82,7 +82,7 @@ describe('Drive Planner Worker', () => {
     const body = { requestId: 'route-request', condition: 'recommended', before: { latitude: 35.681, longitude: 139.767 }, after: { latitude: 35.498, longitude: 138.769 } };
     const fetcher = vi.fn()
       .mockResolvedValueOnce(Response.json({ routes: [{ summary: { distance: 1000, duration: 600 } }] }));
-    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
+    const response = await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
     expect(response.status).toBe(200);
     expect(routing.keys).toEqual(['drive-planner-routing-shared-group-v1']);
     expect(routingIp.keys).toEqual(['unknown']);
@@ -97,7 +97,7 @@ describe('Drive Planner Worker', () => {
     const body = { requestId: 'route-request', condition: 'recommended',
       before: { latitude: 35.681, longitude: 139.767 },
       after: { latitude: 35.498, longitude: 138.769 } };
-    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env,
+    const response = await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: productionOrigin }), env,
       vi.fn().mockResolvedValue(new Response('', { status: 503 })));
     expect(response.status).toBe(502);
     expect(JSON.parse(statement.bind.mock.calls[0][8])).toEqual({
@@ -112,7 +112,7 @@ describe('Drive Planner Worker', () => {
     const body = { requestId: 'route-request', condition: 'recommended',
       before: { latitude: 35.681, longitude: 139.767 },
       after: { latitude: 35.498, longitude: 138.769 } };
-    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env,
+    const response = await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: productionOrigin }), env,
       vi.fn().mockResolvedValue(new Response('', { status: 503 })));
     expect(response.status).toBe(502);
     expect(JSON.parse(statement.bind.mock.calls[0][8])).toEqual({
@@ -124,7 +124,7 @@ describe('Drive Planner Worker', () => {
     const env = environment({ routingAllowed: false }); env.ORS_API_KEY = 'テスト用ダミーORSキー';
     const fetcher = vi.fn();
     const body = { requestId: 'route-request', condition: 'local_roads', before: { latitude: 35.681, longitude: 139.767 }, after: { latitude: 35.498, longitude: 138.769 } };
-    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
+    const response = await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
     expect(response.status).toBe(429); expect(response.headers.get('Retry-After')).toBe('60');
     expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Retry-After');
     expect(await response.json()).toMatchObject({ error: { code: 'rate_limited', retryAfterSeconds: 60 } });
@@ -136,7 +136,7 @@ describe('Drive Planner Worker', () => {
     const env = environment({ routingIpAllowed: false }); env.ORS_API_KEY = 'テスト用ダミーORSキー';
     const fetcher = vi.fn();
     const body = { requestId: 'route-request', condition: 'recommended', before: { latitude: 35.681, longitude: 139.767 }, after: { latitude: 35.498, longitude: 138.769 } };
-    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin, 'CF-Connecting-IP': '192.0.2.20' }), env, fetcher);
+    const response = await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: productionOrigin, 'CF-Connecting-IP': '192.0.2.20' }), env, fetcher);
     expect(response.status).toBe(429);
     expect((env.ROUTING_IP_RATE_LIMITER as FakeRateLimiter).keys).toEqual(['192.0.2.20']);
     expect((env.ROUTING_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
@@ -146,7 +146,7 @@ describe('Drive Planner Worker', () => {
   it('許可されていないOriginのrouting POSTをORSより先に拒否する', async () => {
     const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー'; const fetcher = vi.fn();
     const body = { requestId: 'route-request', condition: 'recommended', before: { latitude: 35.681, longitude: 139.767 }, after: { latitude: 35.498, longitude: 138.769 } };
-    expect((await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: 'https://evil.example' }), env, fetcher)).status).toBe(403);
+    expect((await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: 'https://evil.example' }), env, fetcher)).status).toBe(403);
     expect(fetcher).not.toHaveBeenCalled(); expect((env.ROUTING_RATE_LIMITER as FakeRateLimiter).keys).toEqual([]);
   });
 
@@ -519,5 +519,23 @@ describe('Drive Planner Worker', () => {
     const response = await handleRequest(post(aiEndpoint, input, { Authorization: await authorization(env) }), env);
     expect(response.status).toBe(400);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('Routing endpointのdeploy互換性', () => {
+  it('旧FrontendのPlaceInputをv1で受理しlegacy地点解決を行う', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const place = (name: string, latitude: number, longitude: number) => ({ name, googleMapsUrl: `https://www.google.com/maps?q=${latitude}%2C${longitude}`, locationNote: '', memo: '' });
+    const body = { requestId: 'legacy-route', condition: 'recommended', before: place('東京駅', 35.681, 139.767), after: place('河口湖駅', 35.498, 138.769) };
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ routes: [{ summary: { distance: 1000, duration: 600 } }] }));
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
+    expect(response.status).toBe(200); expect(fetcher).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toMatchObject({ status: 'ok', routingPolicyVersion: 'ors-v2', locationResolution: { before: 'google_maps_coordinates', after: 'google_maps_coordinates' } });
+  });
+
+  it('v2はPlaceInputを拒否しcoordinate-only payloadだけを受理する', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー'; const fetcher = vi.fn();
+    const response = await handleRequest(post('https://api.example.test/v2/routing/segment', { requestId: 'route', condition: 'recommended', before: fixture().segment.before, after: fixture().segment.after }, { Origin: productionOrigin }), env, fetcher);
+    expect(response.status).toBe(400); expect(fetcher).not.toHaveBeenCalled();
   });
 });

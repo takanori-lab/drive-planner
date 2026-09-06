@@ -90,3 +90,25 @@ it('routing requestにはユーザー指定座標だけを入れる', () => {
   expect(() => buildRoutingRequestBody({ ...before, location: null }, after, 'recommended')).toThrow();
   expect(() => buildRoutingRequestBody(before, { ...after, location: { latitude: 35, longitude: 181 } }, 'recommended')).toThrow();
 });
+
+describe('Routing endpointのdeploy互換fallback', () => {
+  const before = { name: '東京駅', googleMapsUrl: 'https://maps.example/tokyo', locationNote: '丸の内', memo: '集合', location: { latitude: 35.681, longitude: 139.767 } };
+  const after = { name: '勝浦駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.153, longitude: 140.312 } };
+  it('新Workerではv2だけをcoordinate payloadで呼ぶ', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json({ status: 'ok', distanceMeters: 1, durationSeconds: 1 }));
+    await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
+    expect(fetchImpl).toHaveBeenCalledOnce(); expect(fetchImpl.mock.calls[0][0]).toBe('https://api.test/v2/routing/segment');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).before).toEqual(before.location);
+  });
+  it.each([404, 405])('v2がHTTP %sの場合だけv1へPlaceInputでfallbackする', async (status) => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response('', { status })).mockResolvedValueOnce(Response.json({ status: 'ok' }));
+    await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2); expect(fetchImpl.mock.calls[1][0]).toBe('https://api.test/v1/routing/segment');
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body).before).toEqual({ name: '東京駅', googleMapsUrl: 'https://maps.example/tokyo', locationNote: '丸の内', memo: '集合' });
+  });
+  it.each([400, 429, 500, 503])('v2がHTTP %sならv1へfallbackしない', async (status) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'error', error: { code: 'routing_unavailable' } }), { status, headers: { 'Content-Type': 'application/json' } }));
+    await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' })).rejects.toBeInstanceOf(WorkerApiError);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+});

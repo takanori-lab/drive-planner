@@ -2,6 +2,8 @@ import { isValidLocation, segmentKey } from './model';
 
 export const API_BASE_URL = 'https://drive-planner-api.takanori-tanaka0517.workers.dev';
 export const SESSION_STORAGE_KEY = 'drive-planner:ai-session:v1';
+export const ROUTING_V2_PATH = '/v2/routing/segment';
+export const ROUTING_V1_PATH = '/v1/routing/segment';
 
 const placeForRequest = (place = {}) => ({
   name: place.name ?? '',
@@ -101,8 +103,15 @@ export function buildRoutingRequestBody(before, after, condition, createRequestI
   return { requestId: createRequestId(), condition, before: before.location, after: after.location };
 }
 
+export function buildLegacyRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {
+  return { requestId: createRequestId(), condition, before: placeForRequest(before), after: placeForRequest(after) };
+}
+
 export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL, signal } = {}) {
-  const response = await fetchImpl(`${baseUrl}/v1/routing/segment`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const response = await fetchImpl(`${baseUrl}${ROUTING_V2_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildRoutingRequestBody(before, after, condition)), signal });
-  return parseResponse(response);
+  if (response.status !== 404 && response.status !== 405) return parseResponse(response);
+  const legacyResponse = await fetchImpl(`${baseUrl}${ROUTING_V1_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildLegacyRoutingRequestBody(before, after, condition)), signal });
+  return parseResponse(legacyResponse);
 }

@@ -19,12 +19,21 @@ export interface SegmentCandidatesRequest {
 }
 export interface CoordinateInput { latitude: number; longitude: number }
 export interface RoutingRequest { requestId: string; condition: 'recommended' | 'local_roads'; before: CoordinateInput; after: CoordinateInput }
+export interface LegacyRoutingRequest { requestId: string; condition: 'recommended' | 'local_roads'; before: PlaceInput; after: PlaceInput }
 
 export function validateRoutingRequest(value: unknown): RoutingRequest {
   const root = object(value, 'body'); exactKeys(root, ['requestId', 'condition', 'before', 'after'], 'body');
   const condition = string(root.condition, 'condition', 20);
   if (condition !== 'recommended' && condition !== 'local_roads') invalid('condition は recommended または local_roads を指定してください。');
   return { requestId: string(root.requestId, 'requestId', 100), condition, before: coordinate(root.before, 'before'), after: coordinate(root.after, 'after') };
+}
+
+/** `/v1/routing/segment` only: stale Frontend compatibility contract. */
+export function validateLegacyRoutingRequest(value: unknown): LegacyRoutingRequest {
+  const root = object(value, 'body'); exactKeys(root, ['requestId', 'condition', 'before', 'after'], 'body');
+  const condition = string(root.condition, 'condition', 20);
+  if (condition !== 'recommended' && condition !== 'local_roads') invalid('condition は recommended または local_roads を指定してください。');
+  return { requestId: string(root.requestId, 'requestId', 100), condition, before: place(root.before, 'before'), after: place(root.after, 'after') };
 }
 
 function coordinate(value: unknown, path: string): CoordinateInput {
