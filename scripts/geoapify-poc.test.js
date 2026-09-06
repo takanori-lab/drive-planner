@@ -1,0 +1,129 @@
+import { describe, expect, it, vi } from 'vitest'
+import { createMarkdown, findExpectedRank, normalizeFeature, RequestPacer, requestGeoapify, runCases } from './geoapify-poc-lib.mjs'
+
+const feature = { properties: { name: '東京駅', formatted: '日本、東京都千代田区 東京駅', state: '東京都', city: '千代田区', lat: 35.681, lon: 139.767, result_type: 'amenity', categories: ['public_transport.train', 'building.transportation'], place_id: 'provider-id' } }
+
+describe('Geoapify PoC', () => {
+  it('レスポンスから候補項目を安全に抽出する', () => {
+    expect(normalizeFeature(feature)).toMatchObject({ name: '東京駅', prefecture: '東京都', city: '千代田区', latitude: 35.681, category: 'public_transport.train, building.transportation', placeId: 'provider-id' })
+    expect(normalizeFeature({ geometry: { coordinates: [139, 35] } })).toMatchObject({ name: '', latitude: 35, longitude: 139 })
+    expect(normalizeFeature({ properties: { categories: [null, 1, 'tourism'] } })).toMatchObject({ category: 'tourism' })
+  })
+
+  it('APIキーを結果やエラーへ含めない', async () => {
+    const key = 'VERY_SECRET_KEY'
+    const fetchImpl = vi.fn(async url => { throw new Error(`failed: ${url}`) })
+    const result = await requestGeoapify({ query: '東京駅', apiKey: key, fetchImpl })
+    expect(JSON.stringify(result)).not.toContain(key)
+    expect(result.error).toContain('[REDACTED]')
+  })
+
+  it('0件とAPIエラーでも結果を返す', async () => {
+    const empty = await requestGeoapify({ query: 'なし', apiKey: 'secret', fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ features: [] }) }) })
+    const failed = await requestGeoapify({ query: '失敗', apiKey: 'secret', fetchImpl: async () => ({ ok: false, status: 500 }) })
+    expect(empty).toMatchObject({ count: 0, status: 200, error: null })
+    expect(failed).toMatchObject({ count: 0, status: 500, error: 'Geoapify returned HTTP 500' })
+  })
+
+  it('候補詳細を含むMarkdownを生成する', () => {
+    const result = { query: '東京駅', api: 'search', request: { lang: 'ja' }, count: 1, candidates: [normalizeFeature(feature)], durationMs: 12, status: 200, error: null }
+    const markdown = createMarkdown([result], [{ category: '基本駅', query: '東京駅', expected: ['東京駅'] }], '2026-09-06T00:00:00Z')
+    expect(markdown).toContain('期待候補順位（補助）')
+    expect(markdown).toContain('| 1 | 東京駅 |')
+    expect(markdown).toContain('人間が確認')
+  })
+
+  it('共有pacerでrequest間隔を適用する', async () => {
+    let clock = 1000
+    const starts = []
+    const sleep = vi.fn(async ms => { clock += ms })
+    const pacer = new RequestPacer({ intervalMs: 250, now: () => clock, sleep })
+    const fetchImpl = vi.fn(async () => {
+      starts.push(clock)
+      return { ok: true, status: 200, json: async () => ({ features: [] }) }
+    })
+    await requestGeoapify({ query: '東京駅', apiKey: 'secret', fetchImpl, pacer })
+    await requestGeoapify({ query: '千葉駅', apiKey: 'secret', fetchImpl, pacer })
+    expect(starts).toEqual([1000, 1250])
+    expect(sleep).toHaveBeenCalledWith(250)
+  })
+
+  it('pacing待ち時間を通信durationへ含めない', async () => {
+    const times = [100, 125]
+    const result = await requestGeoapify({
+      query: '東京駅', apiKey: 'secret', pacer: { wait: async () => 1000 },
+      measureNow: () => times.shift(),
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ features: [] }) }),
+    })
+    expect(result).toMatchObject({ durationMs: 25, waitDurationMs: 1000 })
+  })
+
+  it('429のRetry-Afterを尊重してbounded retryする', async () => {
+    const sleep = vi.fn(async () => {})
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => '2' } })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ features: [feature] }) })
+    const result = await requestGeoapify({ query: '東京駅', apiKey: 'secret', fetchImpl, sleep })
+    expect(sleep).toHaveBeenCalledWith(2000)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ status: 200, count: 1, rateLimitRetries: 1, error: null })
+  })
+
+  it('429後のnetwork errorに古いHTTP statusを残さない', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 429, headers: { get: () => '0' } })
+      .mockRejectedValueOnce(new Error('connection failed'))
+    const result = await requestGeoapify({ query: '東京駅', apiKey: 'secret', fetchImpl, sleep: async () => {} })
+    expect(result).toMatchObject({ status: null, count: 0, rateLimitRetries: 1, error: 'connection failed' })
+  })
+
+  it('timeoutをケースのerrorとして記録して後続ケースを継続する', async () => {
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce((_url, { signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ features: [feature] }) })
+    const results = await runCases({
+      cases: [{ query: 'timeout', expected: [] }, { query: '後続', expected: [] }], apiKey: 'secret', fetchImpl,
+      pacer: new RequestPacer({ intervalMs: 0 }), requestOptions: { requestTimeoutMs: 5 },
+    })
+    expect(results[0]).toMatchObject({ status: null, count: 0 })
+    expect(results[0].error.toLowerCase()).toContain('timeout')
+    expect(results[1]).toMatchObject({ status: 200, count: 1, error: null })
+  })
+
+  it('期待語のAND条件と代替表記のOR条件を区別する', () => {
+    const candidates = [
+      { name: '三井アウトレットパーク 木更津', formatted: '千葉県木更津市' },
+      { name: '海ほたるパーキングエリア', formatted: '千葉県木更津市' },
+    ]
+    expect(findExpectedRank({ expected: ['三井アウトレットパーク', '木更津'] }, candidates)).toBe(1)
+    expect(findExpectedRank({ expected: ['三井アウトレットパーク', '横浜'] }, candidates)).toBeNull()
+    expect(findExpectedRank({ expected: { any: ['海ほたるPA', '海ほたるパーキングエリア'] } }, candidates)).toBe(2)
+  })
+
+  it.each([
+    ['Retry-Afterあり', '2', 2000],
+    ['Retry-Afterなし', null, 3000],
+    ['不正なRetry-After', 'invalid', 3000],
+  ])('最終429（%s）でcooldown後に後続ケースを継続する', async (_label, finalRetryAfter, expectedDelay) => {
+    let clock = 0
+    const starts = []
+    const fetchImpl = vi.fn()
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '0' } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '0' } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => finalRetryAfter } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: true, status: 200, json: async () => ({ features: [feature] }) } })
+    const results = await runCases({
+      cases: [{ query: '制限対象', expected: [] }, { query: '後続', expected: [] }], apiKey: 'secret', fetchImpl,
+      pacer: new RequestPacer({ intervalMs: 0 }),
+      requestOptions: { now: () => clock, sleep: async ms => { clock += ms } },
+    })
+    expect(results[0]).toMatchObject({ status: 429, count: 0, rateLimitRetries: 2 })
+    expect(results[0].error).toContain('rate limit')
+    expect(results[1]).toMatchObject({ status: 200, count: 1, error: null })
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+    expect(starts).toEqual([0, 0, 0, expectedDelay])
+    expect(results[0].waitDurationMs).toBe(expectedDelay)
+  })
+})
