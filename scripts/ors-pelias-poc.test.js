@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CASES, createMarkdown, findExpectedRank, normalizeFeature, RequestPacer, requestOrsPelias, runCases } from './ors-pelias-poc-lib.mjs'
+import { CASES, createMarkdown, findExpectedRank, normalizeFeature, ORS_GEOCODE_BASE_URL, RequestPacer, requestOrsPelias, runCases } from './ors-pelias-poc-lib.mjs'
 
 const feature = { type: 'Feature', geometry: { coordinates: [139.767, 35.681] }, properties: { name: '東京駅', label: '東京駅, 千代田区, 東京都, 日本', street: '丸の内', housenumber: '1-9-1', region: '東京都', county: '千代田区', locality: '丸の内', layer: 'venue', source: 'openstreetmap', source_id: '123', gid: 'openstreetmap:venue:123', category: ['transport', 'train'], confidence: 0.9, match_type: 'exact' } }
 const ok = features => ({ ok: true, status: 200, json: async () => ({ features }) })
@@ -21,7 +21,13 @@ describe('ORS/Pelias PoC', () => {
     const result = await requestOrsPelias({ query: '東京', api, apiKey: 'secret', fetchImpl })
     expect(result).toMatchObject({ api, status: 200, count: 1, error: null })
     expect(result.candidates[0]).toMatchObject({ layer: 'venue', source: 'openstreetmap' })
-    expect(fetchImpl.mock.calls[0][0].pathname).toBe(`/geocode/${api}`)
+    expect(fetchImpl.mock.calls[0][0].origin).toBe('https://api.heigit.org')
+    expect(fetchImpl.mock.calls[0][0].pathname).toBe(`/pelias/v1/${api}`)
+  })
+
+  it('現行Pelias base URLを使いdeprecated hostへ依存しない', () => {
+    expect(ORS_GEOCODE_BASE_URL).toBe('https://api.heigit.org/pelias/v1')
+    expect(ORS_GEOCODE_BASE_URL).not.toContain('api.openrouteservice.org')
   })
 
   it('0件とHTTP errorを結果にする', async () => {

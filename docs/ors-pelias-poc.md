@@ -19,12 +19,12 @@ unset ORS_API_KEY
 
 ## APIとrequest条件
 
-- ORSの現行ホスト`https://api.openrouteservice.org`のGeocoding APIを使用します。完成した20語は`GET /geocode/search`、入力途中の2語は`GET /geocode/autocomplete`です。
+- ORSが現在推奨するホスト`https://api.heigit.org`のPelias APIを使用します。完成した20語は`GET /pelias/v1/search`、入力途中の2語は`GET /pelias/v1/autocomplete`です。
 - 共通条件は`text=<query>`、`lang=ja`、`boundary.country=JP`、`size=5`です。API keyだけはreportのrequest条件から除外します。
 - Structured Searchや独自fallbackは使いません。providerの素のSearch / Autocomplete品質を測るためです。
-- deprecatedな`https://api.heigit.org/pelias/v1/*`へ新しい依存を追加しません。
+- 2026年4月28日以降deprecatedとなった旧`https://api.openrouteservice.org/geocode/*`へ新しい依存を追加しません。旧ホストは2026年8月27日以降quota削減、2026年9月28日停止予定と案内されているため、移行先の`https://api.heigit.org/pelias/v1/*`を使用します。
 
-API仕様は実装時にORS公式の[Geocoding endpoints](https://openrouteservice.org/dev/#/api-docs/geocode)と[API Playground](https://api.openrouteservice.org/)で確認しています。実測時にも契約上のquotaを含む最新仕様を確認してください。
+API仕様とhost移行情報は実装時にORS公式の[Geocoding endpoints](https://openrouteservice.org/dev/#/api-docs/geocode)と[API Playground](https://api.heigit.org/)で確認しています。実測時にも契約上のquotaを含む最新仕様を確認してください。
 
 ## 安全な測定
 

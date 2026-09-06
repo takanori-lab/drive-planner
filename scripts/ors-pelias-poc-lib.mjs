@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-export const ORS_GEOCODE_BASE_URL = 'https://api.openrouteservice.org/geocode'
+export const ORS_GEOCODE_BASE_URL = 'https://api.heigit.org/pelias/v1'
 export const DEFAULT_REQUEST = Object.freeze({ lang: 'ja', 'boundary.country': 'JP', size: 5 })
 export const REQUEST_INTERVAL_MS = 250
 export const MAX_RATE_LIMIT_RETRIES = 2
