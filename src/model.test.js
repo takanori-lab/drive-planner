@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addAiResultsToSegment, aiResultToCandidate, buildChatGptPrompt, buildCompactCandidateMemo, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, updateCandidate, updatePlanInfo, updatePoint } from './model';
+import { addAiResultsToSegment, aiResultToCandidate, buildChatGptPrompt, buildCompactCandidateMemo, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isEndpoint, isGoogleMapsUrl, isRemovable, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, safeGoogleMapsUrl, segmentKey, setCandidateLocation, setPointLocation, updateCandidate, updatePlanInfo, updatePoint } from './model';
 
 describe('plan model', () => {
   it('ドライブ名と日付だけを更新し、地点・候補・未知の情報を維持する', () => {
@@ -50,7 +50,7 @@ describe('plan model', () => {
 
   it('AI resultを通常candidateの項目だけへ変換する', () => {
     const converted = aiResultToCandidate(aiResult(' 湖畔のパン屋 '));
-    expect(Object.keys(converted)).toEqual(['id', 'name', 'googleMapsUrl', 'locationNote', 'memo']);
+    expect(Object.keys(converted)).toEqual(['id', 'name', 'googleMapsUrl', 'locationNote', 'memo', 'location']);
     expect(converted.id).not.toBe('ai- 湖畔のパン屋 ');
     expect(converted).toMatchObject({ name: '湖畔のパン屋', googleMapsUrl: '', locationNote: '山梨県都留市' });
     expect(converted.memo).toBe('湖を眺められる小さなパン屋です。\n寄る理由：通り道から立ち寄りやすいため。\n寄り道 小：所要15分ほど\n確認：営業時間を確認 / 駐車場を確認');
@@ -554,4 +554,27 @@ describe('plan model', () => {
     expect(prompt).not.toContain('地点の場所情報：\n- 東京駅：朝出発');
   });
 
+});
+
+describe('Place location', () => {
+  it('locationなし既存planをnullへ正規化して再読込できる', () => {
+    const plan = normalizePlanMapsUrls({ ...initialPlan(), points: initialPlan().points.map(({ location: _location, ...point }) => point) });
+    expect(plan.points.every((point) => point.location === null)).toBe(true);
+  });
+  it('座標範囲を検証し、地点編集ではlocationを維持する', () => {
+    const original = { ...initialPlan(), points: initialPlan().points.map((point, index) => index ? point : { ...point, location: { latitude: 35.68, longitude: 139.76 } }) };
+    const edited = updatePoint(original, 'tokyo-start', { name: '東京中央駅', googleMapsUrl: 'https://maps.app.goo.gl/test', locationNote: '丸の内', memo: '集合' });
+    expect(edited.points[0].location).toEqual(original.points[0].location);
+    expect(setPointLocation(edited, 'tokyo-start', { latitude: 91, longitude: 0 })).toBe(edited);
+    expect(setPointLocation(edited, 'tokyo-start', { latitude: 0, longitude: 181 })).toBe(edited);
+    expect(setPointLocation(edited, 'tokyo-start', null).points[0]).toMatchObject({ name: '東京中央駅', googleMapsUrl: 'https://maps.app.goo.gl/test', locationNote: '丸の内', memo: '集合', location: null });
+  });
+  it('candidateのlocationを指定でき、route昇格時も維持する', () => {
+    const base = initialPlan(); const key = segmentKey(base.points[0], base.points[1]);
+    const candidate = { id: 'candidate', name: '候補', googleMapsUrl: '', locationNote: '', memo: '', location: null };
+    const withCandidate = { ...base, candidates: { [key]: [candidate] } };
+    const located = setCandidateLocation(withCandidate, key, candidate.id, { latitude: 35, longitude: 139 });
+    expect(insertCandidate(located, 0, candidate.id).points[1].location).toEqual({ latitude: 35, longitude: 139 });
+    expect(insertCandidate(withCandidate, 0, candidate.id).points[1].location).toBeNull();
+  });
 });

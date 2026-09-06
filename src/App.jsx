@@ -2,7 +2,8 @@ import { DragDropProvider } from '@dnd-kit/react';
 import { useSortable } from '@dnd-kit/react/sortable';
 import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom';
 import { useEffect, useRef, useState } from 'react';
-import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, routeTotal, routingConditionForSegment, safeGoogleMapsUrl, segmentKey, setPlanRoutingCondition, setSegmentRoutingCondition, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
+import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, isValidLocation, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, routeTotal, routingConditionForSegment, safeGoogleMapsUrl, segmentKey, setCandidateLocation, setPlanRoutingCondition, setPointLocation, setSegmentRoutingCondition, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
+import { MapPicker } from './MapPicker';
 import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
@@ -30,7 +31,16 @@ function loadPlan() {
   } catch { return initialPlan(); }
 }
 
-export function PointCard({ point, index, total, onEdit, onRemove, handleRef, isDragging }) {
+export function PlaceLocationActions({ place, onSelect, onClear }) {
+  const selected = isValidLocation(place.location);
+  return <div className="place-location-actions">
+    {selected && <span className="location-selected">📍 場所指定済み</span>}
+    <button type="button" className="location-select" onClick={onSelect}>{selected ? '場所を変更' : '場所を指定'}</button>
+    {selected && <button type="button" className="location-clear" onClick={onClear}>場所指定を解除</button>}
+  </div>;
+}
+
+export function PointCard({ point, index, total, onEdit, onRemove, onSelectLocation, onClearLocation, handleRef, isDragging }) {
   const savedMapsUrl = safeGoogleMapsUrl(point.googleMapsUrl);
   const searchUrl = buildGoogleMapsSearchUrl(point);
 
@@ -40,6 +50,7 @@ export function PointCard({ point, index, total, onEdit, onRemove, handleRef, is
       <div className="point-title"><h2>{point.name}</h2>{point.locked === 'main' && <span className="main-badge">MAIN</span>}</div>
       {point.locationNote && <p className="point-location"><span>場所</span>{point.locationNote}</p>}
       {point.memo && <p className="point-memo">{point.memo}</p>}
+      <PlaceLocationActions place={point} onSelect={onSelectLocation} onClear={onClearLocation} />
       <div className="maps-actions">
         <a href={savedMapsUrl || searchUrl} target="_blank" rel="noopener noreferrer">↗ Googleマップで{savedMapsUrl ? '開く' : '探す'}</a>
         <button type="button" className="point-edit" onClick={onEdit}>編集</button>
@@ -50,19 +61,19 @@ export function PointCard({ point, index, total, onEdit, onRemove, handleRef, is
   </article>;
 }
 
-function RouteItem({ point, index, pointIndex, total, children, onEdit, onRemove }) {
+function RouteItem({ point, index, pointIndex, total, children, onEdit, onRemove, onSelectLocation, onClearLocation }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: point.id,
     index,
   });
 
   return <div ref={ref} className={`route-item ${isDragging ? 'is-dragging' : ''}`}>
-    <PointCard point={point} index={pointIndex} total={total} onEdit={onEdit} onRemove={onRemove} handleRef={handleRef} isDragging={isDragging} />
+    <PointCard point={point} index={pointIndex} total={total} onEdit={onEdit} onRemove={onRemove} onSelectLocation={onSelectLocation} onClearLocation={onClearLocation} handleRef={handleRef} isDragging={isDragging} />
     {children}
   </div>;
 }
 
-function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
+function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete, onSelectLocation, onClearLocation }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -80,6 +91,7 @@ function CandidateCard({ candidate, onEdit, onMove, onPromote, onDelete }) {
     <h3>{candidate.name}</h3>
     {candidate.locationNote && <p className="candidate-location"><span>場所</span>{candidate.locationNote}</p>}
     {candidate.memo && <p className="candidate-memo">{candidate.memo}</p>}
+    <PlaceLocationActions place={candidate} onSelect={onSelectLocation} onClear={onClearLocation} />
     {safeGoogleMapsUrl(candidate.googleMapsUrl) && <a className="candidate-maps-link" href={safeGoogleMapsUrl(candidate.googleMapsUrl)} target="_blank" rel="noopener noreferrer">↗ Googleマップで開く</a>}
     <div className="candidate-actions">
       <button type="button" className="primary small" onClick={() => onPromote(candidate.id)}>ルートに追加</button>
@@ -146,13 +158,16 @@ export function abortRouteRequests(cache, controllers) {
   cache.clear();
 }
 
-export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete }) {
-  const unresolvedNames = routeResult?.status === 'unresolved'
-    ? routeResult.unresolved?.map((side) => side === 'before' ? before.name : after.name).filter(Boolean) : [];
+export const routingIdentity = (before, after, condition) => JSON.stringify([
+  before.location?.latitude, before.location?.longitude,
+  after.location?.latitude, after.location?.longitude, condition,
+]);
+
+export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete, onSelectCandidateLocation, onClearCandidateLocation }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
-    <div className="route-metrics"><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? `${routeResult.confidence === 'approximate' ? '概算 ' : ''}${formatRoute(routeResult)}` : routeResult?.status === 'unresolved' ? `${unresolvedNames.join('・') || '地点'}を特定できません` : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
-    {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} />)}
+    <div className="route-metrics"><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? formatRoute(routeResult) : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
+    {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} onSelectLocation={() => onSelectCandidateLocation(candidate.id)} onClearLocation={() => onClearCandidateLocation(candidate.id)} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
     <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>
   </section>;
@@ -436,6 +451,7 @@ function formatPlanDate(date) {
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
   const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
+  const [mapPicker, setMapPicker] = useState(null);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
@@ -446,7 +462,7 @@ export default function App() {
     for (let index = 0; index < plan.points.length - 1; index += 1) {
       const before = plan.points[index], after = plan.points[index + 1];
       const condition = routingConditionForSegment(plan, before, after);
-      activeIdentities.add(JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]));
+      if (isValidLocation(before.location) && isValidLocation(after.location)) activeIdentities.add(routingIdentity(before, after, condition));
     }
     for (const [identity, controller] of routeControllers.current) {
       if (!activeIdentities.has(identity)) { controller.abort(); routeControllers.current.delete(identity); routeCache.current.delete(identity); }
@@ -454,7 +470,11 @@ export default function App() {
     for (let index = 0; index < plan.points.length - 1; index += 1) {
       const before = plan.points[index], after = plan.points[index + 1], key = segmentKey(before, after);
       const condition = routingConditionForSegment(plan, before, after);
-      const identity = JSON.stringify([before.googleMapsUrl || '', before.name || '', before.locationNote || '', after.googleMapsUrl || '', after.name || '', after.locationNote || '', condition]);
+      if (!isValidLocation(before.location) || !isValidLocation(after.location)) {
+        setRouteResults((old) => { const next = { ...old }; delete next[key]; return next; });
+        continue;
+      }
+      const identity = routingIdentity(before, after, condition);
       const pending = cachedRouteRequest(routeCache.current, identity, () => {
         const controller = new AbortController();
         routeControllers.current.set(identity, controller);
@@ -487,7 +507,7 @@ export default function App() {
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
     const condition = routingConditionForSegment(plan, before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} onSelectCandidateLocation={(candidateId) => setMapPicker({ kind: 'candidate', key, id: candidateId })} onClearCandidateLocation={(candidateId) => setPlan((old) => setCandidateLocation(old, key, candidateId, null))} />;
   };
   const totalRoute = routeTotal(plan.points, routeResults);
   return <>
@@ -496,19 +516,19 @@ export default function App() {
       <DragDropProvider sensors={sensors} onDragEnd={finishReorder}>
         <section className="timeline" aria-label="ドライブルート">
           <div className="route-item route-endpoint">
-            <PointCard point={start} index={0} total={plan.points.length} onEdit={() => setPointSheetId(start.id)} />
+            <PointCard point={start} index={0} total={plan.points.length} onEdit={() => setPointSheetId(start.id)} onSelectLocation={() => setMapPicker({ kind: 'point', id: start.id })} onClearLocation={() => setPlan((old) => setPointLocation(old, start.id, null))} />
             {renderSegment(0)}
           </div>
           <div className="sortable-region">
             {middlePoints.map((point, sortableIndex) => {
               const pointIndex = sortableIndex + 1;
-              return <RouteItem key={point.id} point={point} index={sortableIndex} pointIndex={pointIndex} total={plan.points.length} onEdit={() => setPointSheetId(point.id)} onRemove={() => setPlan((old) => removePoint(old, pointIndex))}>
+              return <RouteItem key={point.id} point={point} index={sortableIndex} pointIndex={pointIndex} total={plan.points.length} onEdit={() => setPointSheetId(point.id)} onRemove={() => setPlan((old) => removePoint(old, pointIndex))} onSelectLocation={() => setMapPicker({ kind: 'point', id: point.id })} onClearLocation={() => setPlan((old) => setPointLocation(old, point.id, null))}>
                 {renderSegment(pointIndex)}
               </RouteItem>;
             })}
           </div>
           <div className="route-item route-endpoint">
-            <PointCard point={goal} index={plan.points.length - 1} total={plan.points.length} onEdit={() => setPointSheetId(goal.id)} />
+            <PointCard point={goal} index={plan.points.length - 1} total={plan.points.length} onEdit={() => setPointSheetId(goal.id)} onSelectLocation={() => setMapPicker({ kind: 'point', id: goal.id })} onClearLocation={() => setPlan((old) => setPointLocation(old, goal.id, null))} />
           </div>
         </section>
       </DragDropProvider>
@@ -524,7 +544,7 @@ export default function App() {
         if (mode === 'edit') {
           setPlan((old) => updateCandidate(old, key, candidateId, { name, googleMapsUrl, locationNote, memo }));
         } else {
-          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, googleMapsUrl, locationNote, memo }] } }));
+          setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: [...(old.candidates[key] || []), { id: makeId(), name, googleMapsUrl, locationNote, memo, location: null }] } }));
         }
         setCandidateSheet(null);
       }} />;
@@ -549,6 +569,16 @@ export default function App() {
       const point = plan.points.find((item) => item.id === pointSheetId);
       if (!point) return null;
       return <PointEditSheet point={point} onClose={() => setPointSheetId(null)} onSubmit={(updates) => { setPlan((old) => updatePoint(old, pointSheetId, updates)); setPointSheetId(null); }} />;
+    })()}
+    {mapPicker && (() => {
+      const place = mapPicker.kind === 'point' ? plan.points.find((item) => item.id === mapPicker.id)
+        : plan.candidates[mapPicker.key]?.find((item) => item.id === mapPicker.id);
+      if (!place) return null;
+      return <MapPicker place={place} onCancel={() => setMapPicker(null)} onConfirm={(location) => {
+        setPlan((old) => mapPicker.kind === 'point' ? setPointLocation(old, mapPicker.id, location)
+          : setCandidateLocation(old, mapPicker.key, mapPicker.id, location));
+        setMapPicker(null);
+      }} />;
     })()}
     {aiSegment !== null && (() => {
       const segmentIndex = plan.points.findIndex((point, index) => point.id === aiSegment.beforeId && plan.points[index + 1]?.id === aiSegment.afterId);

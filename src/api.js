@@ -1,7 +1,9 @@
-import { segmentKey } from './model';
+import { isValidLocation, segmentKey } from './model';
 
 export const API_BASE_URL = 'https://drive-planner-api.takanori-tanaka0517.workers.dev';
 export const SESSION_STORAGE_KEY = 'drive-planner:ai-session:v1';
+export const ROUTING_V2_PATH = '/v2/routing/segment';
+export const ROUTING_V1_PATH = '/v1/routing/segment';
 
 const placeForRequest = (place = {}) => ({
   name: place.name ?? '',
@@ -97,11 +99,38 @@ export async function fetchAiCandidates(token, body, { fetchImpl = fetch, baseUr
 }
 
 export function buildRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {
-  return { requestId: createRequestId(), condition, before: placeForRequest(before), after: placeForRequest(after) };
+  if (!isValidLocation(before?.location) || !isValidLocation(after?.location)) throw new Error('経路計算には両端の有効な場所指定が必要です。');
+  return { requestId: createRequestId(), condition, before: before.location, after: after.location };
+}
+
+export function buildLegacyRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {
+  const placeForLegacyRouting = (place) => ({
+    ...placeForRequest(place),
+    googleMapsUrl: isValidLocation(place?.location)
+      ? `https://www.google.com/maps?q=${place.location.latitude},${place.location.longitude}`
+      : placeForRequest(place).googleMapsUrl,
+  });
+  return { requestId: createRequestId(), condition, before: placeForLegacyRouting(before), after: placeForLegacyRouting(after) };
 }
 
 export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL, signal } = {}) {
-  const response = await fetchImpl(`${baseUrl}/v1/routing/segment`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRoutingRequestBody(before, after, condition)), signal });
-  return parseResponse(response);
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}${ROUTING_V2_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildRoutingRequestBody(before, after, condition)), signal });
+  } catch (error) {
+    // An old Worker rejects the cross-origin JSON preflight before JavaScript
+    // can observe a 404. A simple GET distinguishes that deployment gap from
+    // an outage: current Workers recognize this path and answer GET with 405.
+    if (!(error instanceof TypeError) || signal?.aborted) throw error;
+    let probe;
+    try { probe = await fetchImpl(`${baseUrl}${ROUTING_V2_PATH}`, { method: 'GET', signal }); }
+    catch { throw error; }
+    if (probe.status !== 404) throw error;
+    response = probe;
+  }
+  if (response.status !== 404 && response.status !== 405) return parseResponse(response);
+  const legacyResponse = await fetchImpl(`${baseUrl}${ROUTING_V1_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildLegacyRoutingRequestBody(before, after, condition)), signal });
+  return parseResponse(legacyResponse);
 }

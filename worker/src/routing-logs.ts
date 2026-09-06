@@ -1,5 +1,8 @@
 import type { D1Database } from './ai-logs';
-import { ROUTING_POLICY_VERSION, type LocationResolution, type RoutingInput } from './routing';
+import { ROUTING_POLICY_VERSION } from './routing';
+
+type RoutingLogInput = { requestId: string; condition: 'recommended' | 'local_roads' };
+type LocationResolution = { before: string; after: string };
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS routing_evaluation_logs (
  id TEXT PRIMARY KEY, created_at TEXT NOT NULL, request_id TEXT NOT NULL, provider TEXT NOT NULL,
@@ -7,7 +10,7 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS routing_evaluation_logs (
  avoid_features_json TEXT NOT NULL, resolution_methods_json TEXT NOT NULL, distance_meters REAL,
  duration_seconds REAL, status TEXT NOT NULL, error_code TEXT)`;
 
-export async function saveRoutingLog(db: D1Database, input: RoutingInput, result: any, errorCode?: string, errorLocationResolution?: LocationResolution): Promise<void> {
+export async function saveRoutingLog(db: D1Database, input: RoutingLogInput, result: any, errorCode?: string, errorLocationResolution?: LocationResolution): Promise<void> {
   await db.exec(SCHEMA);
   await db.prepare(`INSERT INTO routing_evaluation_logs (id, created_at, request_id, provider, routing_policy_version,
    condition, preference, avoid_features_json, resolution_methods_json, distance_meters, duration_seconds, status, error_code)

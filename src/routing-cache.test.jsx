@@ -90,3 +90,13 @@ it('短い距離と時間をゼロに丸めず表示する', () => {
   expect(formatDuration(30)).toBe('1分未満');
   expect(formatDuration(60)).toBe('1分');
 });
+
+it('routing identityは座標と条件だけに依存する', async () => {
+  const { routingIdentity } = await import('./App');
+  const before = { name: '東京駅', googleMapsUrl: 'old', locationNote: 'old', location: { latitude: 35.68, longitude: 139.76 } };
+  const after = { name: '勝浦駅', location: { latitude: 35.15, longitude: 140.31 } };
+  const identity = routingIdentity(before, after, 'recommended');
+  expect(routingIdentity({ ...before, name: '別名', googleMapsUrl: 'new', locationNote: 'new' }, after, 'recommended')).toBe(identity);
+  expect(routingIdentity({ ...before, location: { latitude: 35.69, longitude: 139.76 } }, after, 'recommended')).not.toBe(identity);
+  expect(routingIdentity(before, after, 'local_roads')).not.toBe(identity);
+});

@@ -5,9 +5,9 @@ export const ROUTE_CONDITION_LOCAL_ROADS = 'local_roads';
 export const initialPlan = () => ({
   title: '東京発・河口湖ドライブ',
   points: [
-    { id: 'tokyo-start', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', locked: 'start' },
-    { id: 'kawaguchiko', name: '河口湖', googleMapsUrl: '', locationNote: '', memo: '', locked: 'main' },
-    { id: 'tokyo-goal', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', locked: 'goal' },
+    { id: 'tokyo-start', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'start' },
+    { id: 'kawaguchiko', name: '河口湖', googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'main' },
+    { id: 'tokyo-goal', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'goal' },
   ],
   candidates: {},
   routingCondition: ROUTE_CONDITION_RECOMMENDED,
@@ -50,6 +50,29 @@ export const makeId = () => `${Date.now().toString(36)}-${Math.random().toString
 
 const compactText = (value) => typeof value === 'string' ? value.trim() : '';
 
+export function isValidLocation(value) {
+  return Boolean(value) && Number.isFinite(value.latitude) && value.latitude >= -90 && value.latitude <= 90
+    && Number.isFinite(value.longitude) && value.longitude >= -180 && value.longitude <= 180;
+}
+
+export const normalizeLocation = (value) => isValidLocation(value)
+  ? { latitude: value.latitude, longitude: value.longitude } : null;
+
+const normalizePlaceLocation = (place) => ({ ...place, location: normalizeLocation(place?.location) });
+
+export function setPointLocation(plan, pointId, location) {
+  if (location !== null && !isValidLocation(location)) return plan;
+  return { ...plan, points: plan.points.map((point) => point.id === pointId
+    ? { ...point, location: location === null ? null : normalizeLocation(location) } : point) };
+}
+
+export function setCandidateLocation(plan, key, candidateId, location) {
+  if (location !== null && !isValidLocation(location)) return plan;
+  if (!plan.candidates[key]?.some((candidate) => candidate.id === candidateId)) return plan;
+  return { ...plan, candidates: { ...plan.candidates, [key]: plan.candidates[key].map((candidate) => candidate.id === candidateId
+    ? { ...candidate, location: location === null ? null : normalizeLocation(location) } : candidate) } };
+}
+
 export function normalizedCandidateName(value) {
   return compactText(value).normalize('NFKC').toLocaleLowerCase().replace(/\s+/gu, '');
 }
@@ -78,6 +101,7 @@ export function aiResultToCandidate(result) {
     googleMapsUrl: '',
     locationNote: compactText(result?.locationHint),
     memo: buildCompactCandidateMemo(result),
+    location: null,
   };
 }
 
@@ -160,10 +184,10 @@ function normalizePlaceMapsUrl(place) {
 export function normalizePlanMapsUrls(plan) {
   return normalizePlanRouting({
     ...plan,
-    points: (plan.points || []).map(normalizePlaceMapsUrl),
+    points: (plan.points || []).map((place) => normalizePlaceLocation(normalizePlaceMapsUrl(place))),
     candidates: Object.fromEntries(Object.entries(plan.candidates || {}).map(([key, candidates]) => [
       key,
-      candidates.map(normalizePlaceMapsUrl),
+      candidates.map((place) => normalizePlaceLocation(normalizePlaceMapsUrl(place))),
     ])),
   });
 }
@@ -248,9 +272,9 @@ export function createPlan({ title, date, startName, mainName, goalName }) {
     title,
     date,
     points: [
-      { id: `${planId}-start`, name: startName, googleMapsUrl: '', locationNote: '', memo: '', locked: 'start' },
-      { id: `${planId}-main`, name: mainName, googleMapsUrl: '', locationNote: '', memo: '', locked: 'main' },
-      { id: `${planId}-goal`, name: goalName, googleMapsUrl: '', locationNote: '', memo: '', locked: 'goal' },
+      { id: `${planId}-start`, name: startName, googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'start' },
+      { id: `${planId}-main`, name: mainName, googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'main' },
+      { id: `${planId}-goal`, name: goalName, googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'goal' },
     ],
     candidates: {},
     routingCondition: ROUTE_CONDITION_RECOMMENDED,
@@ -293,7 +317,7 @@ export function insertCandidate(plan, segmentIndex, candidateId) {
   const oldKey = segmentKey(before, after);
   const candidate = (plan.candidates[oldKey] || []).find((item) => item.id === candidateId);
   if (!candidate) return plan;
-  const point = { id: candidate.id, name: candidate.name, googleMapsUrl: candidate.googleMapsUrl ?? '', locationNote: candidate.locationNote ?? '', memo: candidate.memo || '' };
+  const point = { id: candidate.id, name: candidate.name, googleMapsUrl: candidate.googleMapsUrl ?? '', locationNote: candidate.locationNote ?? '', memo: candidate.memo || '', location: normalizeLocation(candidate.location) };
   const points = [...plan.points.slice(0, segmentIndex + 1), point, ...plan.points.slice(segmentIndex + 1)];
   const rest = (plan.candidates[oldKey] || []).filter((item) => item.id !== candidateId);
   const candidates = { ...plan.candidates };
@@ -349,7 +373,7 @@ export function removePoint(plan, pointIndex) {
   const rightKey = segmentKey(point, after);
   const merged = [
     ...(plan.candidates[leftKey] || []),
-    { id: makeId(), name: point.name, googleMapsUrl: point.googleMapsUrl ?? '', locationNote: point.locationNote ?? '', memo: point.memo ?? '' },
+    { id: makeId(), name: point.name, googleMapsUrl: point.googleMapsUrl ?? '', locationNote: point.locationNote ?? '', memo: point.memo ?? '', location: normalizeLocation(point.location) },
     ...(plan.candidates[rightKey] || []),
   ];
   const candidates = { ...plan.candidates };

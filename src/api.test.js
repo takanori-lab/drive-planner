@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAiRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { buildAiRequestBody, buildRoutingRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { extractGoogleMapsPlace } from '../worker/src/google-maps';
 
 const plan = {
   title: 'テスト旅行',
@@ -80,5 +81,59 @@ it('429のRetry-Afterを再試行待機時間として保持する', async () =>
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'error', error: { code: 'rate_limited', retryable: true } }), {
     status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
   }));
-  await expect(fetchSegmentRoute({}, {}, 'recommended', { fetchImpl })).rejects.toMatchObject({ retryAfterMs: 60_000 });
+  await expect(fetchSegmentRoute({ location: { latitude: 35, longitude: 139 } }, { location: { latitude: 36, longitude: 140 } }, 'recommended', { fetchImpl })).rejects.toMatchObject({ retryAfterMs: 60_000 });
+});
+
+it('routing requestにはユーザー指定座標だけを入れる', () => {
+  const before = { name: '東京駅', googleMapsUrl: 'https://example.test', locationNote: '丸の内', location: { latitude: 35.681, longitude: 139.767 } };
+  const after = { name: '勝浦駅', location: { latitude: 35.153, longitude: 140.312 } };
+  expect(buildRoutingRequestBody(before, after, 'recommended', () => 'request')).toEqual({ requestId: 'request', condition: 'recommended', before: before.location, after: after.location });
+  expect(() => buildRoutingRequestBody({ ...before, location: null }, after, 'recommended')).toThrow();
+  expect(() => buildRoutingRequestBody(before, { ...after, location: { latitude: 35, longitude: 181 } }, 'recommended')).toThrow();
+});
+
+describe('Routing endpointのdeploy互換fallback', () => {
+  const before = { name: '東京駅', googleMapsUrl: 'https://maps.example/tokyo', locationNote: '丸の内', memo: '集合', location: { latitude: 35.681, longitude: 139.767 } };
+  const after = { name: '勝浦駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.153, longitude: 140.312 } };
+  it('新Workerではv2だけをcoordinate payloadで呼ぶ', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json({ status: 'ok', distanceMeters: 1, durationSeconds: 1 }));
+    await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
+    expect(fetchImpl).toHaveBeenCalledOnce(); expect(fetchImpl.mock.calls[0][0]).toBe('https://api.test/v2/routing/segment');
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).before).toEqual(before.location);
+  });
+  it.each([404, 405])('v2がHTTP %sの場合だけv1へPlaceInputでfallbackする', async (status) => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(new Response('', { status })).mockResolvedValueOnce(Response.json({ status: 'ok' }));
+    await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2); expect(fetchImpl.mock.calls[1][0]).toBe('https://api.test/v1/routing/segment');
+    const legacy = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(legacy.before).toEqual({ name: '東京駅', googleMapsUrl: 'https://www.google.com/maps?q=35.681,139.767', locationNote: '丸の内', memo: '集合' });
+    expect(legacy.after.googleMapsUrl).toBe('https://www.google.com/maps?q=35.153,140.312');
+    expect(extractGoogleMapsPlace(legacy.before.googleMapsUrl)).toMatchObject(before.location);
+    expect(extractGoogleMapsPlace(legacy.after.googleMapsUrl)).toMatchObject(after.location);
+    expect(before.googleMapsUrl).toBe('https://maps.example/tokyo'); expect(after.googleMapsUrl).toBe('');
+  });
+  it.each([400, 429, 500, 503])('v2がHTTP %sならv1へfallbackしない', async (status) => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'error', error: { code: 'routing_unavailable' } }), { status, headers: { 'Content-Type': 'application/json' } }));
+    await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' })).rejects.toBeInstanceOf(WorkerApiError);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it('旧Workerでv2 POSTのpreflightが失敗した場合はGET probe後にv1へfallbackする', async () => {
+    const preflightFailure = new TypeError('Failed to fetch');
+    const fetchImpl = vi.fn().mockRejectedValueOnce(preflightFailure)
+      .mockResolvedValueOnce(new Response('', { status: 404 })).mockResolvedValueOnce(Response.json({ status: 'ok' }));
+    await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls[1]).toEqual(['https://api.test/v2/routing/segment', expect.objectContaining({ method: 'GET' })]);
+    expect(fetchImpl.mock.calls[2][0]).toBe('https://api.test/v1/routing/segment');
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body).before.googleMapsUrl).toBe('https://www.google.com/maps?q=35.681,139.767');
+  });
+  it('v2を認識するWorkerやnetwork outageではpreflight失敗をv1で隠さない', async () => {
+    const failure = new TypeError('Failed to fetch');
+    const currentWorker = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(new Response('', { status: 405 }));
+    await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl: currentWorker, baseUrl: 'https://api.test' })).rejects.toBe(failure);
+    expect(currentWorker).toHaveBeenCalledTimes(2);
+    const outage = vi.fn().mockRejectedValue(failure);
+    await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl: outage, baseUrl: 'https://api.test' })).rejects.toBe(failure);
+    expect(outage).toHaveBeenCalledTimes(2);
+  });
 });
