@@ -97,6 +97,14 @@ describe('ORS/Pelias地点解決fallback', () => {
       .resolves.toMatchObject({ longitude: 139.477 });
   });
 
+  it('Pelias metadataを根拠に区切りのない市・区qualifierを個別に検証する', async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(feature('横浜駅', 139.622, 35.466, {
+      label: '横浜駅, 西区, 横浜市, 神奈川県', region: '神奈川県',
+    })));
+    await expect(run(geocode('横浜市西区横浜駅'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.622 });
+  });
+
   it('区切りのない地点名の市区町村qualifierがmetadataになければ採用しない', async () => {
     const fetcher = vi.fn().mockImplementation(async () => response(feature('府中駅', 133.236, 34.568, {
       label: '府中駅, 東京都', region: '東京都',

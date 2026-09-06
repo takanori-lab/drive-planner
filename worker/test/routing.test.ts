@@ -118,6 +118,16 @@ describe('openrouteservice routing provider', () => {
     target.after.googleMapsUrl = 'https://www.google.com/maps?q=35.498%2C138.769';
     await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status })))).rejects.toMatchObject({
       code: 'routing_unavailable', retryable,
+      locationResolution: { before: 'google_maps_coordinates', after: 'google_maps_coordinates' },
+    });
+  });
+
+  it('Directionsの不正responseにも解決済みmethodを保持する', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(geocode(139.767, 35.681))
+      .mockResolvedValueOnce(geocode(138.769, 35.498)).mockResolvedValueOnce(Response.json({ routes: [] }));
+    await expect(calculateRoute(input(), 'dummy', fetcher)).rejects.toMatchObject({
+      code: 'routing_invalid_response',
+      locationResolution: { before: 'place_geocoding', after: 'place_geocoding' },
     });
   });
   it('ORSの429待機時間を伝播し、ヘッダーがなければ60秒にする', async () => {

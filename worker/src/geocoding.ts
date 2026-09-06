@@ -40,19 +40,19 @@ const addressPrefecture = (value: string) => PREFECTURES.find((prefecture) => co
   return /^.+?(?:郡|市|区|町|村)/u.test(remainder);
 }));
 
-const verifiedQualifierParts = (qualifier: string): string[] => {
-  const normalizedQualifier = qualifier.normalize('NFKC');
-  const prefecture = PREFECTURES.find((candidate) => normalizedQualifier.startsWith(candidate));
-  if (!prefecture) return [normalizedQualifier];
-
-  const remainder = normalizedQualifier.slice(prefecture.length);
-  // Split only address-shaped administrative context. This lets metadata such
-  // as `府中市, 東京都` verify `東京都府中市` without treating a POI name like
-  // `東京都市大学` as a prefecture plus an arbitrary suffix.
-  return /^.+?(?:郡|市|区|町|村)(?:$|.+)/u.test(remainder)
-    ? [prefecture, remainder]
-    : [normalizedQualifier];
-};
+function qualifierIsVerified(qualifier: string, metadataParts: string[]): boolean {
+  const wanted = normalize(qualifier);
+  if (!wanted) return false;
+  const evidence = [...new Set(metadataParts.map(normalize).filter(Boolean))];
+  const reachable = new Set([0]);
+  for (let index = 0; index < wanted.length; index += 1) {
+    if (!reachable.has(index)) continue;
+    for (const part of evidence) {
+      if (wanted.startsWith(part, index)) reachable.add(index + part.length);
+    }
+  }
+  return reachable.has(wanted.length);
+}
 
 function explicitPrefecture(locationNote: string, searchText: string, canonicalName: string): typeof PREFECTURES[number] | undefined {
   // An explicitly separated location-note component wins over less
@@ -68,15 +68,15 @@ function nameMatches(properties: NonNullable<Feature['properties']>, canonicalNa
   if (featureName === wantedName) return true;
   if (!featureName) return false;
 
-  const metadata = normalize([properties.region, properties.region_a, properties.label].filter(Boolean).join(' '));
+  const metadataParts = [properties.region, properties.region_a, ...components(properties.label ?? '')].filter(Boolean) as string[];
+  const metadata = normalize(metadataParts.join(' '));
   // Japanese administrative qualifiers commonly omit whitespace (for example,
-  // `東京都府中市府中駅`). When the exact feature name is the suffix, split the
-  // preceding address-shaped qualifier and require every part to be independently
-  // present in the feature hierarchy. This does not permit loose substring matches.
+  // `横浜市西区横浜駅`). When the exact feature name is the suffix, accept the
+  // preceding qualifier only when it can be composed entirely from independent
+  // Pelias hierarchy/label components. This avoids parsing Japanese addresses here.
   if (wantedName.endsWith(featureName)) {
     const qualifier = wantedName.slice(0, -featureName.length);
-    const qualifiers = verifiedQualifierParts(qualifier).map(normalize).filter(Boolean);
-    if (qualifiers.length > 0 && qualifiers.every((part) => metadata.includes(part))
+    if (qualifierIsVerified(qualifier, metadataParts)
       && (!prefecture || metadata.includes(normalize(prefecture)))) return true;
   }
 
@@ -88,10 +88,8 @@ function nameMatches(properties: NonNullable<Feature['properties']>, canonicalNa
   // component is independently present in Pelias hierarchy/label metadata.
   // This deliberately avoids loose prefix/suffix matching.
   const qualifiers = nameComponents
-    .filter((_, index) => index !== matchingIndex)
-    .flatMap(verifiedQualifierParts)
-    .map(normalize);
-  return qualifiers.length > 0 && qualifiers.every((qualifier) => metadata.includes(qualifier))
+    .filter((_, index) => index !== matchingIndex);
+  return qualifiers.length > 0 && qualifiers.every((qualifier) => qualifierIsVerified(qualifier, metadataParts))
     && (!prefecture || metadata.includes(normalize(prefecture)));
 }
 

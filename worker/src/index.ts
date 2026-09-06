@@ -5,7 +5,7 @@ import { generateCandidates } from './openai';
 import { resolveRequestGoogleMaps } from './google-maps';
 import { exportAiLogs, saveAiGenerationLog, type D1Database } from './ai-logs';
 import { ADMIN_PAGE } from './admin-page';
-import { calculateRoute } from './routing';
+import { calculateRoute, type RoutingFailure } from './routing';
 import { saveRoutingLog } from './routing-logs';
 
 const PRODUCTION_ORIGIN = 'https://takanori-lab.github.io';
@@ -159,7 +159,8 @@ export async function handleRequest(request: Request, env: Env, fetcher: typeof 
         result = await calculateRoute(input, env.ORS_API_KEY, fetcher, aiTimeoutMs);
         if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, result); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
       } catch (error) {
-        if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, null, error instanceof ApiError ? error.code : 'internal_error'); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
+        if (env.AI_LOGS_DB) try { await saveRoutingLog(env.AI_LOGS_DB, input, null, error instanceof ApiError ? error.code : 'internal_error',
+          error instanceof Error ? (error as RoutingFailure).locationResolution : undefined); } catch { console.warn('routing_log_write_failed', { requestId: input.requestId }); }
         throw error;
       }
       return Response.json(result, { headers });
