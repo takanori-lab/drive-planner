@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { coordinateInputsFromLocation, MapPicker, locationFromCoordinateInputs } from './MapPicker';
+import { coordinateInputsFromLocation, createMapForDraft, MapPicker, locationFromCoordinateInputs } from './MapPicker';
 import { DEFAULT_MAP_VIEW, MAP_STYLE_URL } from './map-config';
 import { loadMapLibre, resetMapLibreLoaderForTests } from './maplibre-adapter';
 
@@ -40,6 +40,23 @@ describe('MapPicker', () => {
   it('地図タップ相当のlocationを座標入力値へ同期できる', () => {
     expect(coordinateInputsFromLocation({ latitude: 35.123, longitude: 140.456 })).toEqual({ latitude: '35.123', longitude: '140.456' });
     expect(coordinateInputsFromLocation(null)).toEqual({ latitude: '', longitude: '' });
+  });
+  it('loader待機中に更新された最新draftで地図とmarkerを初期化する', async () => {
+    let resolveLoader; let latestDraft = null;
+    const loader = new Promise((resolve) => { resolveLoader = resolve; });
+    const map = { addControl: vi.fn(), on: vi.fn() };
+    const marker = { setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis() };
+    const maplibre = { Map: vi.fn(() => map), Marker: vi.fn(() => marker) };
+    const initialized = loader.then((loaded) => createMapForDraft(loaded, 'map-container', latestDraft));
+    latestDraft = { latitude: 35.153, longitude: 140.312 };
+    resolveLoader(maplibre); await initialized;
+    expect(maplibre.Map).toHaveBeenCalledWith(expect.objectContaining({ center: [140.312, 35.153], zoom: 14 }));
+    expect(marker.setLngLat).toHaveBeenCalledWith([140.312, 35.153]); expect(marker.addTo).toHaveBeenCalledWith(map);
+  });
+  it('draftが更新されない場合はDEFAULT_MAP_VIEWを使いmarkerを置かない', () => {
+    const map = {}; const maplibre = { Map: vi.fn(() => map), Marker: vi.fn() };
+    createMapForDraft(maplibre, 'map-container', null);
+    expect(maplibre.Map).toHaveBeenCalledWith(expect.objectContaining(DEFAULT_MAP_VIEW)); expect(maplibre.Marker).not.toHaveBeenCalled();
   });
   it('provider設定を一箇所に集約する', () => {
     expect(MAP_STYLE_URL).toBe('https://tiles.openfreemap.org/styles/liberty'); expect(DEFAULT_MAP_VIEW).toEqual({ center: [139.7671, 35.6812], zoom: 8 });

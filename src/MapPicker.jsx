@@ -13,11 +13,21 @@ export const coordinateInputsFromLocation = (location) => isValidLocation(locati
   ? { latitude: String(location.latitude), longitude: String(location.longitude) }
   : { latitude: '', longitude: '' };
 
+export function createMapForDraft(maplibre, container, draft) {
+  const hasDraft = isValidLocation(draft);
+  const map = new maplibre.Map({ container, style: MAP_STYLE_URL,
+    center: hasDraft ? [draft.longitude, draft.latitude] : DEFAULT_MAP_VIEW.center,
+    zoom: hasDraft ? 14 : DEFAULT_MAP_VIEW.zoom, attributionControl: true });
+  const marker = hasDraft ? new maplibre.Marker().setLngLat([draft.longitude, draft.latitude]).addTo(map) : null;
+  return { map, marker };
+}
+
 export function MapPicker({ place, onCancel, onConfirm, mapLoader = loadMapLibre }) {
   const containerRef = useRef(null); const mapRef = useRef(null); const markerRef = useRef(null); const maplibreRef = useRef(null);
   const initialLocation = isValidLocation(place.location) ? place.location : null;
   const initialInputs = coordinateInputsFromLocation(initialLocation);
   const [draft, setDraft] = useState(initialLocation);
+  const draftRef = useRef(initialLocation);
   const [latitudeInput, setLatitudeInput] = useState(initialInputs.latitude);
   const [longitudeInput, setLongitudeInput] = useState(initialInputs.longitude);
   const [error, setError] = useState('');
@@ -29,25 +39,25 @@ export function MapPicker({ place, onCancel, onConfirm, mapLoader = loadMapLibre
   const updateFromInputs = (latitude, longitude) => {
     setLatitudeInput(latitude); setLongitudeInput(longitude);
     const location = locationFromCoordinateInputs(latitude, longitude);
-    setDraft(location); placeMarker(location);
+    draftRef.current = location; setDraft(location); placeMarker(location);
   };
   useEffect(() => {
     let disposed = false;
     mapLoader().then((maplibre) => {
       if (disposed || !containerRef.current) return;
       maplibreRef.current = maplibre;
-      const center = draft ? [draft.longitude, draft.latitude] : DEFAULT_MAP_VIEW.center;
-      const map = new maplibre.Map({ container: containerRef.current, style: MAP_STYLE_URL, center, zoom: draft ? 14 : DEFAULT_MAP_VIEW.zoom, attributionControl: true });
+      const latestDraft = draftRef.current;
+      const initialized = createMapForDraft(maplibre, containerRef.current, latestDraft);
+      const map = initialized.map; markerRef.current = initialized.marker;
       mapRef.current = map; map.addControl(new maplibre.NavigationControl(), 'top-right');
       const placeMapMarker = (location) => {
         markerRef.current?.remove();
         markerRef.current = new maplibre.Marker().setLngLat([location.longitude, location.latitude]).addTo(map);
       };
-      if (draft) placeMapMarker(draft);
       map.on('click', (event) => {
         const location = { latitude: event.lngLat.lat, longitude: event.lngLat.lng };
         const inputs = coordinateInputsFromLocation(location);
-        setDraft(location); setLatitudeInput(inputs.latitude); setLongitudeInput(inputs.longitude); placeMapMarker(location);
+        draftRef.current = location; setDraft(location); setLatitudeInput(inputs.latitude); setLongitudeInput(inputs.longitude); placeMapMarker(location);
       });
       map.on('error', () => setError('地図を読み込めませんでした。時間をおいて再度お試しください。'));
     }).catch(() => !disposed && setError('地図を表示できません。その他の編集はそのまま利用できます。'));
