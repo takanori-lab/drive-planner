@@ -29,12 +29,21 @@ const ACCEPTED_LAYERS = new Set(['venue', 'address', 'street', 'station', 'local
 const normalize = (value = '') => value.normalize('NFKC').toLocaleLowerCase('ja').replace(/[\s　・･,，.。\-_()（）]/g, '');
 const components = (value: string) => value.normalize('NFKC').split(/[\s　・･,，.。\-_()（）]+/).filter(Boolean);
 const prefectureComponent = (value: string) => PREFECTURES.find((prefecture) => components(value).includes(prefecture));
+const addressPrefecture = (value: string) => PREFECTURES.find((prefecture) => components(value).some((component) => {
+  if (!component.startsWith(prefecture)) return false;
+  const remainder = component.slice(prefecture.length);
+  // An unseparated prefecture is geographic context only when what follows
+  // has the shape of a municipality. Requiring text before its administrative
+  // suffix distinguishes `東京都府中市` from POI names such as `東京都市大学`.
+  return /^.+?(?:郡|市|区|町|村)/u.test(remainder);
+}));
 
 function explicitPrefecture(locationNote: string, searchText: string, canonicalName: string): typeof PREFECTURES[number] | undefined {
   // An explicitly separated location-note component wins over less
   // authoritative text. Requiring a component boundary prevents POI names such
   // as `東京都市大学` from accidentally becoming a Tokyo region constraint.
-  return prefectureComponent(locationNote) ?? prefectureComponent(searchText) ?? prefectureComponent(canonicalName);
+  return prefectureComponent(locationNote) ?? addressPrefecture(locationNote)
+    ?? prefectureComponent(searchText) ?? prefectureComponent(canonicalName);
 }
 
 function nameMatches(properties: NonNullable<Feature['properties']>, canonicalName: string, prefecture?: string): boolean {

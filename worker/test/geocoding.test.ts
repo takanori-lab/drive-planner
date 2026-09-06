@@ -104,6 +104,22 @@ describe('ORS/Pelias地点解決fallback', () => {
       .resolves.toMatchObject({ longitude: 139.58 });
   });
 
+  it('区切りのない住所形式のlocationNoteから都道府県を抽出する', async () => {
+    const tokyo = feature('府中駅', 139.477, 35.672, { region: '東京都' });
+    const hiroshima = feature('府中駅', 133.236, 34.568, { region: '広島県' });
+    const fetcher = vi.fn().mockResolvedValue(response(tokyo, hiroshima));
+    await expect(run(geocode('府中駅', '府中駅', '東京都府中市'), fetcher))
+      .resolves.toMatchObject({ longitude: 139.477 });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it('住所付き検索失敗後も区切りのないlocationNoteの都道府県を維持する', async () => {
+    const wrongRegion = feature('府中駅', 133.236, 34.568, { region: '広島県' });
+    const fetcher = vi.fn().mockResolvedValueOnce(response()).mockImplementation(async () => response(wrongRegion));
+    await expect(run(geocode('府中駅', '府中駅', '東京都府中市'), fetcher)).resolves.toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(MAX_GEOCODING_REQUESTS);
+  });
+
   it('明示的なlocationNoteの東京都を優先して同名候補を絞り込む', async () => {
     const fetcher = vi.fn().mockResolvedValue(response(
       feature('府中駅', 139.477, 35.672, { region: '東京都' }),
