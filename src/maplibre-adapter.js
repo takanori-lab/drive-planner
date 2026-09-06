@@ -25,7 +25,10 @@ function loadScript(documentObject) {
       script = documentObject.createElement('script'); script.src = MAPLIBRE_SCRIPT_URL; script.async = true;
       script.setAttribute(SCRIPT_MARKER, 'true'); documentObject.head.append(script);
     }
-    script.addEventListener('load', () => globalThis.maplibregl ? resolve(globalThis.maplibregl) : reject(new Error('MapLibre could not be loaded')), { once: true });
+    script.addEventListener('load', () => {
+      if (globalThis.maplibregl) resolve(globalThis.maplibregl);
+      else { script.remove(); reject(new Error('MapLibre could not be loaded')); }
+    }, { once: true });
     script.addEventListener('error', () => { script.remove(); reject(new Error('MapLibre could not be loaded')); }, { once: true });
   });
 }

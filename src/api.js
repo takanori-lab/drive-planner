@@ -114,8 +114,21 @@ export function buildLegacyRoutingRequestBody(before, after, condition, createRe
 }
 
 export async function fetchSegmentRoute(before, after, condition, { fetchImpl = fetch, baseUrl = API_BASE_URL, signal } = {}) {
-  const response = await fetchImpl(`${baseUrl}${ROUTING_V2_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildRoutingRequestBody(before, after, condition)), signal });
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}${ROUTING_V2_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildRoutingRequestBody(before, after, condition)), signal });
+  } catch (error) {
+    // An old Worker rejects the cross-origin JSON preflight before JavaScript
+    // can observe a 404. A simple GET distinguishes that deployment gap from
+    // an outage: current Workers recognize this path and answer GET with 405.
+    if (!(error instanceof TypeError) || signal?.aborted) throw error;
+    let probe;
+    try { probe = await fetchImpl(`${baseUrl}${ROUTING_V2_PATH}`, { method: 'GET', signal }); }
+    catch { throw error; }
+    if (probe.status !== 404) throw error;
+    response = probe;
+  }
   if (response.status !== 404 && response.status !== 405) return parseResponse(response);
   const legacyResponse = await fetchImpl(`${baseUrl}${ROUTING_V1_PATH}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildLegacyRoutingRequestBody(before, after, condition)), signal });

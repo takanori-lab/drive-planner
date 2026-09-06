@@ -83,6 +83,13 @@ describe('MapPicker', () => {
     expect(documentObject.nodes).not.toContain(failedScript); const second = loadMapLibre(documentObject); const retriedScript = node(documentObject, 'script');
     expect(retriedScript).not.toBe(failedScript); globalThis.maplibregl = {}; retriedScript.dispatch('load'); await expect(second).resolves.toBe(globalThis.maplibregl);
   });
+  it('script load後にMapLibreが公開されなければscriptを除去してretryする', async () => {
+    const documentObject = fakeDocument(); const first = loadMapLibre(documentObject); const failedScript = node(documentObject, 'script');
+    node(documentObject, 'link').dispatch('load'); failedScript.dispatch('load'); await expect(first).rejects.toThrow('MapLibre');
+    expect(documentObject.nodes).not.toContain(failedScript);
+    const second = loadMapLibre(documentObject); const retriedScript = node(documentObject, 'script');
+    expect(retriedScript).not.toBe(failedScript); globalThis.maplibregl = {}; retriedScript.dispatch('load'); await expect(second).resolves.toBe(globalThis.maplibregl);
+  });
   it('同時呼び出しではscriptとlinkを重複生成しない', async () => {
     const documentObject = fakeDocument(); const first = loadMapLibre(documentObject); const second = loadMapLibre(documentObject);
     expect(second).toBe(first); expect(documentObject.nodes).toHaveLength(2);

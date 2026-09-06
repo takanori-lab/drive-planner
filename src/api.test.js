@@ -117,4 +117,23 @@ describe('Routing endpointのdeploy互換fallback', () => {
     await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' })).rejects.toBeInstanceOf(WorkerApiError);
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
+  it('旧Workerでv2 POSTのpreflightが失敗した場合はGET probe後にv1へfallbackする', async () => {
+    const preflightFailure = new TypeError('Failed to fetch');
+    const fetchImpl = vi.fn().mockRejectedValueOnce(preflightFailure)
+      .mockResolvedValueOnce(new Response('', { status: 404 })).mockResolvedValueOnce(Response.json({ status: 'ok' }));
+    await fetchSegmentRoute(before, after, 'recommended', { fetchImpl, baseUrl: 'https://api.test' });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls[1]).toEqual(['https://api.test/v2/routing/segment', expect.objectContaining({ method: 'GET' })]);
+    expect(fetchImpl.mock.calls[2][0]).toBe('https://api.test/v1/routing/segment');
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body).before.googleMapsUrl).toBe('https://www.google.com/maps?q=35.681,139.767');
+  });
+  it('v2を認識するWorkerやnetwork outageではpreflight失敗をv1で隠さない', async () => {
+    const failure = new TypeError('Failed to fetch');
+    const currentWorker = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(new Response('', { status: 405 }));
+    await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl: currentWorker, baseUrl: 'https://api.test' })).rejects.toBe(failure);
+    expect(currentWorker).toHaveBeenCalledTimes(2);
+    const outage = vi.fn().mockRejectedValue(failure);
+    await expect(fetchSegmentRoute(before, after, 'recommended', { fetchImpl: outage, baseUrl: 'https://api.test' })).rejects.toBe(failure);
+    expect(outage).toHaveBeenCalledTimes(2);
+  });
 });
