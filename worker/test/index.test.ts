@@ -107,6 +107,21 @@ describe('Drive Planner Worker', () => {
     });
   });
 
+  it('片方のgeocoding失敗時も解決済み地点methodをrouting logへ保存する', async () => {
+    const env = environment(); env.ORS_API_KEY = 'テスト用ダミーORSキー';
+    const statement: any = { bind: vi.fn(() => statement), run: vi.fn(async () => ({})) };
+    env.AI_LOGS_DB = { exec: vi.fn(async () => ({})), prepare: vi.fn(() => statement) };
+    const body = { requestId: 'route-request', condition: 'recommended',
+      before: { ...fixture().segment.before, googleMapsUrl: 'https://www.google.com/maps?q=35.681%2C139.767' },
+      after: fixture().segment.after };
+    const response = await handleRequest(post('https://api.example.test/v1/routing/segment', body, { Origin: productionOrigin }), env,
+      vi.fn().mockResolvedValue(new Response('', { status: 503 })));
+    expect(response.status).toBe(502);
+    expect(JSON.parse(statement.bind.mock.calls[0][8])).toEqual({
+      before: 'google_maps_coordinates', after: 'unresolved',
+    });
+  });
+
   it('routing rate limit超過時はORSを呼ばず429を返す', async () => {
     const env = environment({ routingAllowed: false }); env.ORS_API_KEY = 'テスト用ダミーORSキー';
     const fetcher = vi.fn();

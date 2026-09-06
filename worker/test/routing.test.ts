@@ -142,4 +142,12 @@ describe('openrouteservice routing provider', () => {
       code: 'routing_unavailable', retryable,
     });
   });
+  it('片方のgeocoding失敗時も解決済み地点methodを保持する', async () => {
+    const target = input();
+    target.before.googleMapsUrl = 'https://www.google.com/maps?q=35.681%2C139.767';
+    await expect(calculateRoute(target, 'dummy', vi.fn().mockResolvedValue(new Response('', { status: 503 })))).rejects.toMatchObject({
+      code: 'routing_unavailable',
+      locationResolution: { before: 'google_maps_coordinates', after: 'unresolved' },
+    });
+  });
 });

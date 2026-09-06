@@ -62,7 +62,21 @@ export async function resolveLocation(place: PlaceInput, apiKey: string, fetcher
 
 export async function calculateRoute(input: RoutingInput, apiKey: string, fetcher: typeof fetch = fetch, timeoutMs = 8000): Promise<RoutingResult | UnresolvedRoutingResult> {
   const deadline = Date.now() + timeoutMs;
-  const [before, after] = await Promise.all([resolveLocation(input.before, apiKey, fetcher, deadline), resolveLocation(input.after, apiKey, fetcher, deadline)]);
+  const [beforeResult, afterResult] = await Promise.allSettled([
+    resolveLocation(input.before, apiKey, fetcher, deadline),
+    resolveLocation(input.after, apiKey, fetcher, deadline),
+  ]);
+  const before = beforeResult.status === 'fulfilled' ? beforeResult.value : null;
+  const after = afterResult.status === 'fulfilled' ? afterResult.value : null;
+  const geocodingFailure = beforeResult.status === 'rejected' ? beforeResult.reason
+    : afterResult.status === 'rejected' ? afterResult.reason : undefined;
+  if (geocodingFailure !== undefined) {
+    if (geocodingFailure instanceof Error) (geocodingFailure as RoutingFailure).locationResolution = {
+      before: before?.method ?? 'unresolved',
+      after: after?.method ?? 'unresolved',
+    };
+    throw geocodingFailure;
+  }
   if (!before || !after) return { status: 'unresolved', provider: 'openrouteservice', routingPolicyVersion: ROUTING_POLICY_VERSION, unresolved: [...(!before ? ['before' as const] : []), ...(!after ? ['after' as const] : [])],
     locationResolution: { before: before?.method ?? 'unresolved', after: after?.method ?? 'unresolved' } };
   const options = input.condition === 'local_roads' ? { avoid_features: ['highways'] } : undefined;
