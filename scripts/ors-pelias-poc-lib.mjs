@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 export const ORS_GEOCODE_BASE_URL = 'https://api.heigit.org/pelias/v1'
@@ -87,7 +87,7 @@ export async function requestOrsPelias({
   const request = { ...DEFAULT_REQUEST }
   if (!apiKey) return { query, api, request, count: 0, candidates: [], durationMs: 0, waitDurationMs: 0, status: null, rateLimitRetries: 0, error: 'ORS_API_KEY が未設定です' }
   const url = new URL(`${ORS_GEOCODE_BASE_URL}/${api}`)
-  url.search = new URLSearchParams({ api_key: apiKey, text: query, ...request }).toString()
+  url.search = new URLSearchParams({ text: query, ...request }).toString()
   let status = null; let rateLimitRetries = 0; let durationMs = 0; let waitDurationMs = 0
   while (true) {
     try {
@@ -96,7 +96,7 @@ export async function requestOrsPelias({
       const started = measureNow()
       let response; let payload
       try {
-        response = await fetchImpl(url, { headers: { Accept: 'application/geo+json' }, signal: AbortSignal.timeout(requestTimeoutMs) })
+        response = await fetchImpl(url, { headers: { Accept: 'application/geo+json', Authorization: apiKey }, signal: AbortSignal.timeout(requestTimeoutMs) })
         status = response.status
         if (response.ok) payload = await response.json()
       } finally { durationMs += Math.max(0, measureNow() - started) }
@@ -165,5 +165,7 @@ export function createMarkdown(results, cases = CASES, generatedAt = new Date().
 }
 
 export async function writeReport(path, markdown) {
-  await mkdir(dirname(path), { recursive: true }); await writeFile(path, markdown, { encoding: 'utf8', mode: 0o600 })
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, markdown, { encoding: 'utf8', mode: 0o600 })
+  await chmod(path, 0o600)
 }

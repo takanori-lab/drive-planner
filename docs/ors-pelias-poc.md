@@ -15,12 +15,12 @@ npm run poc:ors-pelias
 unset ORS_API_KEY
 ```
 
-キーは`ORS_API_KEY`からだけ読みます。未設定ならrequestを開始せず終了します。キーをsource、引数、URLのログ、error、reportへ出力しません。結果はGit管理外の`artifacts/ors-pelias-poc/report.md`へ権限`0600`で生成します。実測結果を共有する場合も、commit前に秘密情報がないことを確認してください。
+キーは`ORS_API_KEY`からだけ読み、query parameterではなく`Authorization` headerで送ります。未設定ならrequestを開始せず終了します。キーをsource、引数、URLのログ、error、reportへ出力しません。結果はGit管理外の`artifacts/ors-pelias-poc/report.md`へ生成し、新規作成時だけでなく既存ファイルの上書き時にも権限を`0600`へ設定します。実測結果を共有する場合も、commit前に秘密情報がないことを確認してください。
 
 ## APIとrequest条件
 
 - ORSが現在推奨するホスト`https://api.heigit.org`のPelias APIを使用します。完成した20語は`GET /pelias/v1/search`、入力途中の2語は`GET /pelias/v1/autocomplete`です。
-- 共通条件は`text=<query>`、`lang=ja`、`boundary.country=JP`、`size=5`です。API keyだけはreportのrequest条件から除外します。
+- 共通条件は`text=<query>`、`lang=ja`、`boundary.country=JP`、`size=5`です。API keyはURLへ含めず`Authorization` headerで送信し、reportのrequest条件からも除外します。
 - Structured Searchや独自fallbackは使いません。providerの素のSearch / Autocomplete品質を測るためです。
 - 2026年4月28日以降deprecatedとなった旧`https://api.openrouteservice.org/geocode/*`へ新しい依存を追加しません。旧ホストは2026年8月27日以降quota削減、2026年9月28日停止予定と案内されているため、移行先の`https://api.heigit.org/pelias/v1/*`を使用します。
 

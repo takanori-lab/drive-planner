@@ -1,5 +1,8 @@
+import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { CASES, createMarkdown, findExpectedRank, normalizeFeature, ORS_GEOCODE_BASE_URL, RequestPacer, requestOrsPelias, runCases } from './ors-pelias-poc-lib.mjs'
+import { CASES, createMarkdown, findExpectedRank, normalizeFeature, ORS_GEOCODE_BASE_URL, RequestPacer, requestOrsPelias, runCases, writeReport } from './ors-pelias-poc-lib.mjs'
 
 const feature = { type: 'Feature', geometry: { coordinates: [139.767, 35.681] }, properties: { name: '東京駅', label: '東京駅, 千代田区, 東京都, 日本', street: '丸の内', housenumber: '1-9-1', region: '東京都', county: '千代田区', locality: '丸の内', layer: 'venue', source: 'openstreetmap', source_id: '123', gid: 'openstreetmap:venue:123', category: ['transport', 'train'], confidence: 0.9, match_type: 'exact' } }
 const ok = features => ({ ok: true, status: 200, json: async () => ({ features }) })
@@ -21,8 +24,11 @@ describe('ORS/Pelias PoC', () => {
     const result = await requestOrsPelias({ query: '東京', api, apiKey: 'secret', fetchImpl })
     expect(result).toMatchObject({ api, status: 200, count: 1, error: null })
     expect(result.candidates[0]).toMatchObject({ layer: 'venue', source: 'openstreetmap' })
-    expect(fetchImpl.mock.calls[0][0].origin).toBe('https://api.heigit.org')
-    expect(fetchImpl.mock.calls[0][0].pathname).toBe(`/pelias/v1/${api}`)
+    const [url, options] = fetchImpl.mock.calls[0]
+    expect(url.origin).toBe('https://api.heigit.org')
+    expect(url.pathname).toBe(`/pelias/v1/${api}`)
+    expect(url.searchParams.has('api_key')).toBe(false)
+    expect(options.headers).toMatchObject({ Authorization: 'secret' })
   })
 
   it('現行Pelias base URLを使いdeprecated hostへ依存しない', () => {
@@ -40,7 +46,7 @@ describe('ORS/Pelias PoC', () => {
     const missing = await requestOrsPelias({ query: '東京駅', fetchImpl })
     expect(fetchImpl).not.toHaveBeenCalled(); expect(missing.error).toContain('未設定')
     const key = 'SECRET/+ KEY'
-    const failed = await requestOrsPelias({ query: '東京駅', apiKey: key, fetchImpl: async url => { throw new Error(String(url)) } })
+    const failed = await requestOrsPelias({ query: '東京駅', apiKey: key, fetchImpl: async (url, options) => { throw new Error(`${url} ${options.headers.Authorization}`) } })
     expect(JSON.stringify(failed)).not.toContain(key)
     expect(JSON.stringify(failed)).not.toContain(encodeURIComponent(key))
     expect(failed.error).toContain('[REDACTED]')
@@ -87,5 +93,18 @@ describe('ORS/Pelias PoC', () => {
     const markdown = createMarkdown([result], [{ category: '基本駅', query: '東京駅', expected: ['東京駅'] }], '2026-09-06T00:00:00Z')
     expect(markdown).toContain('自動補助順位'); expect(markdown).toContain('人間が確認')
     expect(markdown).toContain('openstreetmap:venue:123'); expect(markdown).not.toContain('api_key')
+  })
+
+  it('既存reportを上書きするときもpermissionを0600にする', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ors-pelias-poc-'))
+    const path = join(directory, 'report.md')
+    try {
+      await writeFile(path, 'old report')
+      await chmod(path, 0o644)
+      await writeReport(path, 'new report')
+      expect((await stat(path)).mode & 0o777).toBe(0o600)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })
