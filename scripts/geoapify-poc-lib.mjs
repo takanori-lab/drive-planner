@@ -112,10 +112,9 @@ export async function requestGeoapify({
       }
       if (status === 429) {
         const finalDelayMs = retryAfterMs(response.headers?.get?.('retry-after'), now())
-        if (finalDelayMs !== null) {
-          await sleep(finalDelayMs)
-          waitDurationMs += finalDelayMs
-        }
+          ?? 1000 * (rateLimitRetries + 1)
+        await sleep(finalDelayMs)
+        waitDurationMs += finalDelayMs
         throw new Error(`Geoapify rate limit (HTTP 429) remained after ${rateLimitRetries} retries`)
       }
       if (!response.ok) throw new Error(`Geoapify returned HTTP ${response.status}`)

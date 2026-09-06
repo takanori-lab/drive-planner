@@ -76,13 +76,17 @@ describe('Geoapify PoC', () => {
     expect(result).toMatchObject({ status: null, count: 0, rateLimitRetries: 1, error: 'connection failed' })
   })
 
-  it('retry上限後はrate limit errorを記録し後続ケースを継続する', async () => {
+  it.each([
+    ['Retry-Afterあり', '2', 2000],
+    ['Retry-Afterなし', null, 3000],
+    ['不正なRetry-After', 'invalid', 3000],
+  ])('最終429（%s）でcooldown後に後続ケースを継続する', async (_label, finalRetryAfter, expectedDelay) => {
     let clock = 0
     const starts = []
     const fetchImpl = vi.fn()
     fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '0' } } })
     fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '0' } } })
-    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => '2' } } })
+    fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: false, status: 429, headers: { get: () => finalRetryAfter } } })
     fetchImpl.mockImplementationOnce(async () => { starts.push(clock); return { ok: true, status: 200, json: async () => ({ features: [feature] }) } })
     const results = await runCases({
       cases: [{ query: '制限対象', expected: [] }, { query: '後続', expected: [] }], apiKey: 'secret', fetchImpl,
@@ -93,7 +97,7 @@ describe('Geoapify PoC', () => {
     expect(results[0].error).toContain('rate limit')
     expect(results[1]).toMatchObject({ status: 200, count: 1, error: null })
     expect(fetchImpl).toHaveBeenCalledTimes(4)
-    expect(starts).toEqual([0, 0, 0, 2000])
-    expect(results[0].waitDurationMs).toBe(2000)
+    expect(starts).toEqual([0, 0, 0, expectedDelay])
+    expect(results[0].waitDurationMs).toBe(expectedDelay)
   })
 })
