@@ -150,41 +150,36 @@ export function cachedRouteRequest(cache, identity, request) {
   return pending;
 }
 
-export const ROUTE_CACHE_STORAGE_KEY = 'drive-planner:route-cache:v1';
-
-export function loadRouteCache(storage = globalThis.localStorage) {
-  try {
-    const entries = JSON.parse(storage?.getItem(ROUTE_CACHE_STORAGE_KEY));
-    if (!Array.isArray(entries)) return new Map();
-    return new Map(entries.filter(([identity, result]) => typeof identity === 'string' && result?.status === 'ok')
-      .map(([identity, result]) => [identity, Promise.resolve(result)]));
-  } catch { return new Map(); }
-}
-
-export function storeRouteResult(storage, identity, result) {
-  if (result?.status !== 'ok') return;
-  try {
-    const stored = JSON.parse(storage?.getItem(ROUTE_CACHE_STORAGE_KEY));
-    const results = new Map(Array.isArray(stored) ? stored : []);
-    results.set(identity, result);
-    storage?.setItem(ROUTE_CACHE_STORAGE_KEY, JSON.stringify([...results]));
-  } catch { /* localStorageが利用できない場合も経路表示は継続する */ }
-}
-
 export function abortRouteRequests(cache, controllers) {
-  for (const [identity, controller] of controllers) {
-    controller.abort();
-    cache.delete(identity);
-  }
+  for (const controller of controllers.values()) controller.abort();
   controllers.clear();
   // An aborted promise must not survive React StrictMode's setup/cleanup/setup
   // cycle; the next setup needs to issue a fresh request for the same segment.
+  cache.clear();
 }
 
 export const routingIdentity = (before, after, condition) => JSON.stringify([
   before.location?.latitude, before.location?.longitude,
   after.location?.latitude, after.location?.longitude, condition,
 ]);
+
+const SAMPLE_ROUTE_RESULTS = {
+  'tokyo-start::kawaguchiko': { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 },
+  'kawaguchiko::tokyo-goal': { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 },
+};
+
+export function initialSampleRouteResults(plan) {
+  const sample = initialPlan();
+  const isSample = plan.title === sample.title
+    && plan.routingCondition === sample.routingCondition
+    && Object.keys(plan.segmentRoutingConditions || {}).length === 0
+    && plan.points.length === sample.points.length
+    && plan.points.every((point, index) => point.id === sample.points[index].id
+      && point.name === sample.points[index].name
+      && point.location?.latitude === sample.points[index].location.latitude
+      && point.location?.longitude === sample.points[index].location.longitude);
+  return isSample ? SAMPLE_ROUTE_RESULTS : {};
+}
 
 export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete, onSelectCandidateLocation, onClearCandidateLocation }) {
   return <section className="segment">
@@ -476,8 +471,7 @@ function formatPlanDate(date) {
 
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
-  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(null); const routeControllers = useRef(new Map());
-  if (routeCache.current === null) routeCache.current = loadRouteCache();
+  const [routeResults, setRouteResults] = useState(() => initialSampleRouteResults(plan)); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
   const [mapPicker, setMapPicker] = useState(null);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
@@ -502,11 +496,15 @@ export default function App() {
         continue;
       }
       const identity = routingIdentity(before, after, condition);
+      const sampleResult = initialSampleRouteResults(plan)[key];
+      if (sampleResult) {
+        setRouteResults((old) => ({ ...old, [key]: sampleResult }));
+        continue;
+      }
       const pending = cachedRouteRequest(routeCache.current, identity, () => {
         const controller = new AbortController();
         routeControllers.current.set(identity, controller);
         return requestRouteWithRetry(() => fetchSegmentRoute(before, after, condition, { signal: controller.signal }), undefined, controller.signal)
-          .then((result) => { storeRouteResult(globalThis.localStorage, identity, result); return result; })
           .finally(() => { if (routeControllers.current.get(identity) === controller) routeControllers.current.delete(identity); });
       });
       setRouteResults((old) => ({ ...old, [key]: { status: 'loading' } }));
