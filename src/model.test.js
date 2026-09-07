@@ -117,11 +117,11 @@ describe('plan model', () => {
     const prompt = buildChatGptPrompt(plan, 1, '景色がいい場所が気になる');
     expect(prompt).toContain('2026年8月29日');
     expect(prompt).toContain('「富士山周辺ドライブ」');
-    expect(prompt).toContain('東京駅 → 湖畔のパン屋 → 河口湖 → 東京駅');
-    expect(prompt).toContain('「湖畔のパン屋 → 河口湖」');
-    expect(prompt).toContain('メインの目的地は「河口湖」');
-    expect(prompt).toContain('地点の場所情報：\n- 湖畔のパン屋：河口湖の北側にある店舗\n- 河口湖：富士スバルライン五合目');
-    expect(prompt).toContain('地点メモ：\n- 湖畔のパン屋：美味しい\n- 河口湖：写真を撮りたい');
+    expect(prompt).toContain('東京駅 → 湖畔のパン屋 → 河口湖駅 → 東京駅');
+    expect(prompt).toContain('「湖畔のパン屋 → 河口湖駅」');
+    expect(prompt).toContain('メインの目的地は「河口湖駅」');
+    expect(prompt).toContain('地点の場所情報：\n- 湖畔のパン屋：河口湖の北側にある店舗\n- 河口湖駅：富士スバルライン五合目');
+    expect(prompt).toContain('地点メモ：\n- 湖畔のパン屋：美味しい\n- 河口湖駅：写真を撮りたい');
     expect(prompt).toContain('- 湖畔のケーキ屋（河口湖町○○）\n- 展望台');
     expect(prompt).toContain('追加の希望：\n景色がいい場所が気になる');
     expect(prompt).toContain('候補を5件提案してください');
@@ -140,9 +140,9 @@ describe('plan model', () => {
   it('builds a prompt without optional date, candidates, or request', () => {
     const prompt = buildChatGptPrompt(initialPlan(), 0, '   ');
     expect(prompt).toContain('車で「東京発・河口湖ドライブ」をします。');
-    expect(prompt).toContain('東京駅 → 河口湖 → 東京駅');
-    expect(prompt).toContain('「東京駅 → 河口湖」');
-    expect(prompt).toContain('メインの目的地は「河口湖」');
+    expect(prompt).toContain('東京駅 → 河口湖駅 → 東京駅');
+    expect(prompt).toContain('「東京駅 → 河口湖駅」');
+    expect(prompt).toContain('メインの目的地は「河口湖駅」');
     expect(prompt).not.toContain('年');
     expect(prompt).not.toContain('すでに候補になっている場所：');
     expect(prompt).not.toContain('追加の希望：');
@@ -167,7 +167,7 @@ describe('plan model', () => {
 
     const prompt = buildChatGptPrompt(plan, 0);
 
-    expect(prompt).toContain('地点メモ：\n- 河口湖：湖の北岸を中心に観光');
+    expect(prompt).toContain('地点メモ：\n- 河口湖駅：湖の北岸を中心に観光');
     expect(prompt).not.toContain('地点の場所情報：');
     expect(prompt).not.toContain('- 東京駅：');
   });
@@ -197,7 +197,7 @@ describe('plan model', () => {
     const key = segmentKey(plan.points[0], plan.points[1]);
     plan.candidates[key] = [{ id: 'view', name: '展望台', memo: '夕方' }];
     const next = insertCandidate(plan, 0, 'view');
-    expect(next.points.map((p) => p.name)).toEqual(['東京駅', '展望台', '河口湖', '東京駅']);
+    expect(next.points.map((p) => p.name)).toEqual(['東京駅', '展望台', '河口湖駅', '東京駅']);
     expect(segmentKey(next.points[0], next.points[1])).toBe('tokyo-start::view');
     expect(segmentKey(next.points[1], next.points[2])).toBe('view::kawaguchiko');
   });
@@ -481,7 +481,7 @@ describe('plan model', () => {
     ];
 
     const prompt = buildChatGptPrompt(plan, 0);
-    expect(prompt).toContain('地点の場所情報：\n- 河口湖：富士スバルライン五合目');
+    expect(prompt).toContain('地点の場所情報：\n- 河口湖駅：富士スバルライン五合目');
     expect(prompt).not.toContain('地点の場所情報：\n- 東京駅：美味しい');
     expect(prompt).toContain('地点メモ：\n- 東京駅：美味しい');
     expect(prompt).toContain('- 湖畔のケーキ屋（河口湖町○○）\n- 展望台');

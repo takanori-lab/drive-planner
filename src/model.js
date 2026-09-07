@@ -6,7 +6,7 @@ export const initialPlan = () => ({
   title: '東京発・河口湖ドライブ',
   points: [
     { id: 'tokyo-start', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.68126, longitude: 139.76671 }, locked: 'start' },
-    { id: 'kawaguchiko', name: '河口湖', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.49803, longitude: 138.76898 }, locked: 'main' },
+    { id: 'kawaguchiko', name: '河口湖駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.49803, longitude: 138.76898 }, locked: 'main' },
     { id: 'tokyo-goal', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.68126, longitude: 139.76671 }, locked: 'goal' },
   ],
   candidates: {},

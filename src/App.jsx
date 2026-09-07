@@ -150,12 +150,35 @@ export function cachedRouteRequest(cache, identity, request) {
   return pending;
 }
 
+export const ROUTE_CACHE_STORAGE_KEY = 'drive-planner:route-cache:v1';
+
+export function loadRouteCache(storage = globalThis.localStorage) {
+  try {
+    const entries = JSON.parse(storage?.getItem(ROUTE_CACHE_STORAGE_KEY));
+    if (!Array.isArray(entries)) return new Map();
+    return new Map(entries.filter(([identity, result]) => typeof identity === 'string' && result?.status === 'ok')
+      .map(([identity, result]) => [identity, Promise.resolve(result)]));
+  } catch { return new Map(); }
+}
+
+export function storeRouteResult(storage, identity, result) {
+  if (result?.status !== 'ok') return;
+  try {
+    const stored = JSON.parse(storage?.getItem(ROUTE_CACHE_STORAGE_KEY));
+    const results = new Map(Array.isArray(stored) ? stored : []);
+    results.set(identity, result);
+    storage?.setItem(ROUTE_CACHE_STORAGE_KEY, JSON.stringify([...results]));
+  } catch { /* localStorageが利用できない場合も経路表示は継続する */ }
+}
+
 export function abortRouteRequests(cache, controllers) {
-  for (const controller of controllers.values()) controller.abort();
+  for (const [identity, controller] of controllers) {
+    controller.abort();
+    cache.delete(identity);
+  }
   controllers.clear();
   // An aborted promise must not survive React StrictMode's setup/cleanup/setup
   // cycle; the next setup needs to issue a fresh request for the same segment.
-  cache.clear();
 }
 
 export const routingIdentity = (before, after, condition) => JSON.stringify([
@@ -395,7 +418,7 @@ export function CandidateSheet({ route, initialName = '', initialGoogleMapsUrl =
 export function PointEditSheet({ point, onClose, onSubmit }) {
   const [name, setName] = useState(point.name); const [googleMapsUrl, setGoogleMapsUrl] = useState(point.googleMapsUrl ?? ''); const [locationNote, setLocationNote] = useState(point.locationNote ?? ''); const [memo, setMemo] = useState(point.memo ?? '');
   const nameChanged = name.trim() !== point.name.trim();
-  const hasExistingDetails = Boolean(point.googleMapsUrl?.trim() || point.locationNote?.trim() || point.memo?.trim());
+  const hasExistingDetails = hasExistingPlaceDetails(point);
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <form className="sheet candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="point-edit-title" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onSubmit({ name: name.trim(), googleMapsUrl: googleMapsUrl.trim(), locationNote: locationNote.trim(), memo: memo.trim() }); }}>
       <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">EDIT STOP</span><h2 id="point-edit-title">場所情報を編集</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
@@ -406,6 +429,9 @@ export function PointEditSheet({ point, onClose, onSubmit }) {
     </form>
   </div>;
 }
+
+export const hasExistingPlaceDetails = (point) => Boolean(point.googleMapsUrl?.trim()
+  || point.locationNote?.trim() || point.memo?.trim() || isValidLocation(point.location));
 
 export function PlanInfoSheet({ plan, onClose, onSubmit }) {
   const [title, setTitle] = useState(plan.title ?? ''); const [date, setDate] = useState(plan.date ?? '');
@@ -450,7 +476,8 @@ function formatPlanDate(date) {
 
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
-  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
+  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(null); const routeControllers = useRef(new Map());
+  if (routeCache.current === null) routeCache.current = loadRouteCache();
   const [mapPicker, setMapPicker] = useState(null);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
@@ -479,6 +506,7 @@ export default function App() {
         const controller = new AbortController();
         routeControllers.current.set(identity, controller);
         return requestRouteWithRetry(() => fetchSegmentRoute(before, after, condition, { signal: controller.signal }), undefined, controller.signal)
+          .then((result) => { storeRouteResult(globalThis.localStorage, identity, result); return result; })
           .finally(() => { if (routeControllers.current.get(identity) === controller) routeControllers.current.delete(identity); });
       });
       setRouteResults((old) => ({ ...old, [key]: { status: 'loading' } }));

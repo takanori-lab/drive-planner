@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { abortRouteRequests, cachedRouteRequest, formatDistance, formatDuration, requestRouteWithRetry } from './App';
+import { abortRouteRequests, cachedRouteRequest, formatDistance, formatDuration, loadRouteCache, requestRouteWithRetry, ROUTE_CACHE_STORAGE_KEY, storeRouteResult } from './App';
 import { WorkerApiError } from './api';
 
 it('成功結果は再利用し、一時的なerrorは次の機会に再試行する', async () => {
@@ -69,6 +69,13 @@ it('unmount時に中止済みrequestをcacheへ残さない', () => {
   expect(controllers.size).toBe(0);
 });
 
+it('unmount時も再利用可能な完了済みrouting cacheを維持する', () => {
+  const completed = Promise.resolve({ status: 'ok' });
+  const cache = new Map([['completed', completed]]);
+  abortRouteRequests(cache, new Map());
+  expect(cache.get('completed')).toBe(completed);
+});
+
 it('古いrequestの完了時に同じidentityの新しいcacheを削除しない', async () => {
   let finishOld;
   const oldRequest = new Promise((resolve) => { finishOld = resolve; });
@@ -99,4 +106,22 @@ it('routing identityは座標と条件だけに依存する', async () => {
   expect(routingIdentity({ ...before, name: '別名', googleMapsUrl: 'new', locationNote: 'new' }, after, 'recommended')).toBe(identity);
   expect(routingIdentity({ ...before, location: { latitude: 35.69, longitude: 139.76 } }, after, 'recommended')).not.toBe(identity);
   expect(routingIdentity(before, after, 'local_roads')).not.toBe(identity);
+});
+
+it('成功したrouting結果をlocalStorageから再利用する', async () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const result = { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 };
+  storeRouteResult(storage, 'sample', result);
+  const request = vi.fn();
+
+  await expect(cachedRouteRequest(loadRouteCache(storage), 'sample', request)).resolves.toEqual(result);
+  expect(request).not.toHaveBeenCalled();
+  expect(JSON.parse(values.get(ROUTE_CACHE_STORAGE_KEY))).toEqual([['sample', result]]);
+});
+
+it('失敗したrouting結果はlocalStorageに保存しない', () => {
+  const storage = { getItem: vi.fn(() => null), setItem: vi.fn() };
+  storeRouteResult(storage, 'sample', { status: 'error' });
+  expect(storage.setItem).not.toHaveBeenCalled();
 });
