@@ -5,9 +5,9 @@ export const ROUTE_CONDITION_LOCAL_ROADS = 'local_roads';
 export const initialPlan = () => ({
   title: '東京発・河口湖ドライブ',
   points: [
-    { id: 'tokyo-start', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'start' },
-    { id: 'kawaguchiko', name: '河口湖', googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'main' },
-    { id: 'tokyo-goal', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: null, locked: 'goal' },
+    { id: 'tokyo-start', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.68126, longitude: 139.76671 }, locked: 'start' },
+    { id: 'kawaguchiko', name: '河口湖', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.49803, longitude: 138.76898 }, locked: 'main' },
+    { id: 'tokyo-goal', name: '東京駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.68126, longitude: 139.76671 }, locked: 'goal' },
   ],
   candidates: {},
   routingCondition: ROUTE_CONDITION_RECOMMENDED,

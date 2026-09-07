@@ -557,6 +557,17 @@ describe('plan model', () => {
 });
 
 describe('Place location', () => {
+  it('サンプルプランの各地点に固定座標を設定する', () => {
+    expect(initialPlan().points.map((point) => point.location)).toEqual([
+      { latitude: 35.68126, longitude: 139.76671 },
+      { latitude: 35.49803, longitude: 138.76898 },
+      { latitude: 35.68126, longitude: 139.76671 },
+    ]);
+  });
+  it('通常の新規プランには座標を自動付与しない', () => {
+    const plan = createPlan({ title: '旅', date: '2026-09-01', startName: '東京駅', mainName: '河口湖', goalName: '東京駅' });
+    expect(plan.points.map((point) => point.location)).toEqual([null, null, null]);
+  });
   it('locationなし既存planをnullへ正規化して再読込できる', () => {
     const plan = normalizePlanMapsUrls({ ...initialPlan(), points: initialPlan().points.map(({ location: _location, ...point }) => point) });
     expect(plan.points.every((point) => point.location === null)).toBe(true);
