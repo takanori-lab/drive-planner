@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { canPreviewRoute, createRoutePreviewMap, handleRoutePreviewKeyDown, normalizeRouteGeometry, routeBounds, RoutePreview } from './RoutePreview';
+import { canPreviewRoute, createRoutePreviewMap, handleRoutePreviewKeyDown, normalizeRouteGeometry, routeBounds, RoutePreview, unwrapRouteGeometry } from './RoutePreview';
 
 const before = { name: '出発地', location: { latitude: 35, longitude: 139 } };
 const after = { name: '到着地', location: { latitude: 36, longitude: 140 } };
@@ -41,6 +41,7 @@ describe('RoutePreview', () => {
   it('日付変更線を跨ぐgeometryを短いlongitude範囲へunwrapする', () => {
     const crossing = { type: 'LineString', coordinates: [[179.4, 45], [-179.7, 46], [-179.2, 44]] };
     expect(routeBounds(crossing)).toEqual([[179.4, 44], [180.8, 46]]);
+    expect(unwrapRouteGeometry(crossing)).toEqual({ type: 'LineString', coordinates: [[179.4, 45], [180.3, 46], [180.8, 44]] });
   });
   it('短いviewportでpanelをscroll可能にしmap高さを抑える', () => {
     const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
@@ -76,6 +77,17 @@ describe('RoutePreview', () => {
     expect(fake.markerInstances[0].setLngLat).toHaveBeenCalledWith([139, 35]);
     expect(fake.markerInstances[1].setLngLat).toHaveBeenCalledWith([140, 36]);
     expect(fake.map.fitBounds).toHaveBeenCalledWith([[139.2, 35.1], [140.1, 36.1]], expect.objectContaining({ padding: 48 }));
+  });
+  it('日付変更線を跨ぐrouteではsourceとboundsへ同じ短い経度範囲を使う', () => {
+    const fake = fakeMapLibre();
+    const crossing = { type: 'LineString', coordinates: [[179.4, 45], [-179.7, 46], [-179.2, 44]] };
+    const expectedGeometry = { type: 'LineString', coordinates: [[179.4, 45], [180.3, 46], [180.8, 44]] };
+    createRoutePreviewMap(fake.maplibre, 'container', crossing, before.location, after.location, vi.fn(), documentObject);
+    fake.handlers.load();
+    expect(fake.map.addSource).toHaveBeenCalledWith('route-preview', {
+      type: 'geojson', data: { type: 'Feature', properties: {}, geometry: expectedGeometry },
+    });
+    expect(fake.map.fitBounds).toHaveBeenCalledWith([[179.4, 44], [180.8, 46]], expect.objectContaining({ padding: 48 }));
   });
   it('source追加失敗とmap errorを地図内エラーへ隔離する', () => {
     const fake = fakeMapLibre(); const onError = vi.fn(); fake.map.addSource.mockImplementation(() => { throw new Error('style failure'); });

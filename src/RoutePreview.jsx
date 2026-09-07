@@ -15,7 +15,7 @@ export function normalizeRouteGeometry(geometry) {
   return coordinates.every(Boolean) ? { type: 'LineString', coordinates } : null;
 }
 
-export const routeBounds = (geometry) => {
+export const unwrapRouteGeometry = (geometry) => {
   const valid = normalizeRouteGeometry(geometry);
   if (!valid) return null;
   let previousLongitude = valid.coordinates[0][0];
@@ -27,10 +27,18 @@ export const routeBounds = (geometry) => {
     previousLongitude = nextLongitude;
     return [nextLongitude, latitude];
   });
-  return unwrapped.reduce((bounds, [longitude, latitude]) => [
-    [Math.min(bounds[0][0], longitude), Math.min(bounds[0][1], latitude)],
-    [Math.max(bounds[1][0], longitude), Math.max(bounds[1][1], latitude)],
-  ], [[Infinity, Infinity], [-Infinity, -Infinity]]);
+  return { type: 'LineString', coordinates: unwrapped };
+};
+
+const boundsFromUnwrappedGeometry = (geometry) => geometry.coordinates.reduce((bounds, [longitude, latitude]) => [
+  [Math.min(bounds[0][0], longitude), Math.min(bounds[0][1], latitude)],
+  [Math.max(bounds[1][0], longitude), Math.max(bounds[1][1], latitude)],
+], [[Infinity, Infinity], [-Infinity, -Infinity]]);
+
+export const routeBounds = (geometry) => {
+  const unwrapped = unwrapRouteGeometry(geometry);
+  if (!unwrapped) return null;
+  return boundsFromUnwrappedGeometry(unwrapped);
 };
 
 export function canPreviewRoute(before, after, routeResult) {
@@ -57,15 +65,15 @@ function markerElement(documentObject, label, kind) {
 }
 
 export function createRoutePreviewMap(maplibre, container, geometry, start, end, onError, documentObject = document) {
-  const normalized = normalizeRouteGeometry(geometry); const bounds = routeBounds(normalized);
-  if (!normalized || !bounds || !isValidLocation(start) || !isValidLocation(end)) throw new Error('Invalid route preview data');
+  const unwrapped = unwrapRouteGeometry(geometry); const bounds = unwrapped && boundsFromUnwrappedGeometry(unwrapped);
+  if (!unwrapped || !bounds || !isValidLocation(start) || !isValidLocation(end)) throw new Error('Invalid route preview data');
   const map = new maplibre.Map({ container, style: MAP_STYLE_URL, attributionControl: true });
   const markers = [];
   const fail = () => onError?.();
   map.on('error', fail);
   map.on('load', () => {
     try {
-      map.addSource('route-preview', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: normalized } });
+      map.addSource('route-preview', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: unwrapped } });
       map.addLayer({ id: 'route-preview-line', type: 'line', source: 'route-preview', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#28734a', 'line-width': 5, 'line-opacity': 0.9 } });
       markers.push(new maplibre.Marker({ element: markerElement(documentObject, 'START', 'start') }).setLngLat([start.longitude, start.latitude]).addTo(map));
       markers.push(new maplibre.Marker({ element: markerElement(documentObject, 'END', 'end') }).setLngLat([end.longitude, end.latitude]).addTo(map));
