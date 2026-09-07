@@ -4,6 +4,7 @@ import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dn
 import { useEffect, useRef, useState } from 'react';
 import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, isValidLocation, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, routeTotal, routingConditionForSegment, safeGoogleMapsUrl, segmentKey, setCandidateLocation, setPlanRoutingCondition, setPointLocation, setSegmentRoutingCondition, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
 import { MapPicker } from './MapPicker';
+import { canPreviewRoute, RoutePreview } from './RoutePreview';
 import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, ROUTING_POLICY_VERSION, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
@@ -187,10 +188,10 @@ export function initialSampleRouteResults(plan, routingPolicyVersion = ROUTING_P
     ? SAMPLE_ROUTE_RESULTS.segments : {};
 }
 
-export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete, onSelectCandidateLocation, onClearCandidateLocation }) {
+export function Segment({ before, after, candidates, routeResult, condition, onCondition, onPreview, onAdd, onAsk, onEdit, onMove, onPromote, onDelete, onSelectCandidateLocation, onClearCandidateLocation }) {
   return <section className="segment">
     <div className="segment-line"><span>↓</span><small>{before.name} から {after.name} まで</small></div>
-    <div className="route-metrics"><div><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? formatRoute(routeResult) : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span>{routeResult?.status === 'ok' && routeResult.majorRoads?.length > 0 && <small>主な経路: {routeResult.majorRoads.join(' → ')}</small>}</div><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
+    <div className="route-metrics"><div><span role="status">{routeResult?.status === 'loading' ? '道路距離を計算中…' : routeResult?.status === 'ok' ? formatRoute(routeResult) : routeResult?.status === 'error' ? '距離・時間を取得できません' : ''}</span>{routeResult?.status === 'ok' && routeResult.majorRoads?.length > 0 && <small>主な経路: {routeResult.majorRoads.join(' → ')}</small>}{canPreviewRoute(before, after, routeResult) && <button type="button" className="route-preview-trigger" onClick={onPreview}>経路を見る</button>}</div><label>経路: <select aria-label={`${before.name}から${after.name}の経路条件`} value={condition} onChange={(event) => onCondition(event.target.value)}><option value="recommended">おすすめ</option><option value="local_roads">一般道中心</option></select></label></div>
     {candidates.map((candidate) => <CandidateCard key={candidate.id} candidate={candidate} onEdit={onEdit} onMove={onMove} onPromote={onPromote} onDelete={onDelete} onSelectLocation={() => onSelectCandidateLocation(candidate.id)} onClearLocation={() => onClearCandidateLocation(candidate.id)} />)}
     <button className="add-candidate" onClick={onAdd}>＋ この区間に候補を追加</button>
     <button className="ask-chatgpt" onClick={onAsk}>✨ この区間の候補を探す</button>
@@ -479,6 +480,8 @@ export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
   const [routeResults, setRouteResults] = useState(() => initialSampleRouteResults(plan)); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
   const [mapPicker, setMapPicker] = useState(null);
+  const [routePreviewKey, setRoutePreviewKey] = useState(null);
+  const routePreviewTriggerRef = useRef(null);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
@@ -539,7 +542,7 @@ export default function App() {
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
     const condition = routingConditionForSegment(plan, before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} onSelectCandidateLocation={(candidateId) => setMapPicker({ kind: 'candidate', key, id: candidateId })} onClearCandidateLocation={(candidateId) => setPlan((old) => setCandidateLocation(old, key, candidateId, null))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onPreview={(event) => { routePreviewTriggerRef.current = event.currentTarget; setRoutePreviewKey(key); }} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} onSelectCandidateLocation={(candidateId) => setMapPicker({ kind: 'candidate', key, id: candidateId })} onClearCandidateLocation={(candidateId) => setPlan((old) => setCandidateLocation(old, key, candidateId, null))} />;
   };
   const totalRoute = routeTotal(plan.points, routeResults);
   return <>
@@ -601,6 +604,12 @@ export default function App() {
       const point = plan.points.find((item) => item.id === pointSheetId);
       if (!point) return null;
       return <PointEditSheet point={point} onClose={() => setPointSheetId(null)} onSubmit={(updates) => { setPlan((old) => updatePoint(old, pointSheetId, updates)); setPointSheetId(null); }} />;
+    })()}
+    {routePreviewKey && (() => {
+      const index = plan.points.findIndex((point, pointIndex) => segmentKey(point, plan.points[pointIndex + 1] || {}) === routePreviewKey);
+      const before = plan.points[index]; const after = plan.points[index + 1]; const routeResult = routeResults[routePreviewKey];
+      if (!canPreviewRoute(before, after, routeResult)) return null;
+      return <RoutePreview before={before} after={after} routeResult={routeResult} returnFocusRef={routePreviewTriggerRef} onClose={() => setRoutePreviewKey(null)} />;
     })()}
     {mapPicker && (() => {
       const place = mapPicker.kind === 'point' ? plan.points.find((item) => item.id === mapPicker.id)
