@@ -40,6 +40,17 @@ describe('既存ドライブ編集UI', () => {
     }
   });
 
+  it('有効geometryと確認済み両地点がある通常区間だけ経路プレビュー導線を表示する', () => {
+    const props = { before: { name: 'A', location: { latitude: 35, longitude: 139 } }, after: { name: 'B', location: { latitude: 36, longitude: 140 } },
+      candidates: [], condition: 'recommended', onCondition: () => undefined, onPreview: () => undefined, onAdd: () => undefined,
+      onAsk: () => undefined, onEdit: () => undefined, onMove: () => undefined, onPromote: () => undefined, onDelete: () => undefined,
+      onSelectCandidateLocation: () => undefined, onClearCandidateLocation: () => undefined };
+    const valid = { status: 'ok', distanceMeters: 1000, durationSeconds: 60, geometry: { type: 'LineString', coordinates: [[139, 35], [140, 36]] } };
+    expect(renderToStaticMarkup(<Segment {...props} routeResult={valid} />)).toContain('経路を見る');
+    expect(renderToStaticMarkup(<Segment {...props} routeResult={{ ...valid, geometry: undefined }} />)).not.toContain('経路を見る');
+    expect(renderToStaticMarkup(<Segment {...props} routeResult={{ status: 'ok', distanceMeters: 1000, durationSeconds: 60 }} />)).not.toContain('経路を見る');
+  });
+
   it('現在値入りのドライブ情報編集Sheetを表示する', () => {
     const html = renderToStaticMarkup(<PlanInfoSheet plan={{ title: '夏のドライブ', date: '2026-08-24' }} onClose={() => undefined} onSubmit={() => undefined} />);
     expect(html).toContain('ドライブ情報を編集');
