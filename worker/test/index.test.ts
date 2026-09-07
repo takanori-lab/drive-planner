@@ -81,7 +81,7 @@ describe('Drive Planner Worker', () => {
     const ai = env.AI_RATE_LIMITER as FakeRateLimiter;
     const body = { requestId: 'route-request', condition: 'recommended', before: { latitude: 35.681, longitude: 139.767 }, after: { latitude: 35.498, longitude: 138.769 } };
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(Response.json({ routes: [{ summary: { distance: 1000, duration: 600 } }] }));
+      .mockResolvedValueOnce(Response.json({ features: [{ properties: { summary: { distance: 1000, duration: 600 }, segments: [] } }] }));
     const response = await handleRequest(post('https://api.example.test/v2/routing/segment', body, { Origin: productionOrigin }), env, fetcher);
     expect(response.status).toBe(200);
     expect(routing.keys).toEqual(['drive-planner-routing-shared-group-v1']);
