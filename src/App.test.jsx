@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { AiCandidateResults, AiCandidateSheet, AiSearchingView, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, SearchCompanionAnimation, Segment, acquireSearchInFlight, authenticateCandidateSession, candidateLoadingMessage, requestSegmentCandidates } from './App';
+import { AiCandidateResults, AiCandidateSheet, AiSearchingView, CandidateSheet, PlanInfoSheet, PointCard, PointEditSheet, SearchCompanionAnimation, Segment, acquireSearchInFlight, authenticateCandidateSession, candidateLoadingMessage, hasExistingPlaceDetails, requestSegmentCandidates } from './App';
 import { initialPlan } from './model';
 import { SESSION_STORAGE_KEY } from './api';
 
@@ -42,6 +42,12 @@ describe('既存ドライブ編集UI', () => {
     expect(html).toContain('maxLength="60"');
     expect(html).toContain('maxLength="300"');
     expect(html).toContain('maxLength="200"');
+  });
+
+  it('固定locationも地点名変更時の確認対象に含める', () => {
+    const point = { id: 'main', locked: 'main', name: '河口湖駅', googleMapsUrl: '', locationNote: '', memo: '', location: { latitude: 35.49803, longitude: 138.76898 } };
+    expect(hasExistingPlaceDetails(point)).toBe(true);
+    expect(hasExistingPlaceDetails({ ...point, location: null })).toBe(false);
   });
 
   it('PointCardは情報を表示し、inline editorではなく統一された編集操作を持つ', () => {

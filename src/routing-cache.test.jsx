@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { abortRouteRequests, cachedRouteRequest, formatDistance, formatDuration, requestRouteWithRetry } from './App';
+import { abortRouteRequests, cachedRouteRequest, formatDistance, formatDuration, initialSampleRouteResults, requestRouteWithRetry } from './App';
+import { createPlan, initialPlan } from './model';
 import { WorkerApiError } from './api';
 
 it('成功結果は再利用し、一時的なerrorは次の機会に再試行する', async () => {
@@ -99,4 +100,21 @@ it('routing identityは座標と条件だけに依存する', async () => {
   expect(routingIdentity({ ...before, name: '別名', googleMapsUrl: 'new', locationNote: 'new' }, after, 'recommended')).toBe(identity);
   expect(routingIdentity({ ...before, location: { latitude: 35.69, longitude: 139.76 } }, after, 'recommended')).not.toBe(identity);
   expect(routingIdentity(before, after, 'local_roads')).not.toBe(identity);
+});
+
+it('初期サンプルだけはAPI不要の距離・時間を持つ', () => {
+  expect(initialSampleRouteResults(initialPlan())).toEqual({
+    'tokyo-start::kawaguchiko': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+    'kawaguchiko::tokyo-goal': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+  });
+  expect(initialSampleRouteResults(initialPlan(), 'ors-v3')).toEqual({});
+  const normal = createPlan({ title: '旅', date: '2026-09-01', startName: '東京駅', mainName: '河口湖駅', goalName: '東京駅' });
+  expect(initialSampleRouteResults(normal)).toEqual({});
+  expect(initialSampleRouteResults({ ...initialPlan(), routingCondition: 'local_roads' })).toEqual({});
+  const changedLocation = initialPlan();
+  changedLocation.points[1].location = { latitude: 35.5, longitude: 138.77 };
+  expect(initialSampleRouteResults(changedLocation)).toEqual({});
+  const changedName = initialPlan();
+  changedName.points[1].name = '河口湖';
+  expect(initialSampleRouteResults(changedName)).toEqual({});
 });

@@ -4,7 +4,7 @@ import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dn
 import { useEffect, useRef, useState } from 'react';
 import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, isValidLocation, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, routeTotal, routingConditionForSegment, safeGoogleMapsUrl, segmentKey, setCandidateLocation, setPlanRoutingCondition, setPointLocation, setSegmentRoutingCondition, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
 import { MapPicker } from './MapPicker';
-import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
+import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, ROUTING_POLICY_VERSION, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
   PointerSensor.configure({
@@ -162,6 +162,30 @@ export const routingIdentity = (before, after, condition) => JSON.stringify([
   before.location?.latitude, before.location?.longitude,
   after.location?.latitude, after.location?.longitude, condition,
 ]);
+
+// Regenerate the sample metrics when ROUTING_POLICY_VERSION changes, then
+// update this recorded version. A mismatch deliberately falls back to the API.
+const SAMPLE_ROUTE_RESULTS = {
+  routingPolicyVersion: 'ors-v2',
+  segments: {
+    'tokyo-start::kawaguchiko': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+    'kawaguchiko::tokyo-goal': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+  },
+};
+
+export function initialSampleRouteResults(plan, routingPolicyVersion = ROUTING_POLICY_VERSION) {
+  const sample = initialPlan();
+  const isSample = plan.title === sample.title
+    && plan.routingCondition === sample.routingCondition
+    && Object.keys(plan.segmentRoutingConditions || {}).length === 0
+    && plan.points.length === sample.points.length
+    && plan.points.every((point, index) => point.id === sample.points[index].id
+      && point.name === sample.points[index].name
+      && point.location?.latitude === sample.points[index].location.latitude
+      && point.location?.longitude === sample.points[index].location.longitude);
+  return isSample && SAMPLE_ROUTE_RESULTS.routingPolicyVersion === routingPolicyVersion
+    ? SAMPLE_ROUTE_RESULTS.segments : {};
+}
 
 export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete, onSelectCandidateLocation, onClearCandidateLocation }) {
   return <section className="segment">
@@ -395,7 +419,7 @@ export function CandidateSheet({ route, initialName = '', initialGoogleMapsUrl =
 export function PointEditSheet({ point, onClose, onSubmit }) {
   const [name, setName] = useState(point.name); const [googleMapsUrl, setGoogleMapsUrl] = useState(point.googleMapsUrl ?? ''); const [locationNote, setLocationNote] = useState(point.locationNote ?? ''); const [memo, setMemo] = useState(point.memo ?? '');
   const nameChanged = name.trim() !== point.name.trim();
-  const hasExistingDetails = Boolean(point.googleMapsUrl?.trim() || point.locationNote?.trim() || point.memo?.trim());
+  const hasExistingDetails = hasExistingPlaceDetails(point);
   return <div className="sheet-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <form className="sheet candidate-sheet" role="dialog" aria-modal="true" aria-labelledby="point-edit-title" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onSubmit({ name: name.trim(), googleMapsUrl: googleMapsUrl.trim(), locationNote: locationNote.trim(), memo: memo.trim() }); }}>
       <div className="sheet-grip" /><div className="sheet-head"><div><span className="eyebrow">EDIT STOP</span><h2 id="point-edit-title">場所情報を編集</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></div>
@@ -406,6 +430,9 @@ export function PointEditSheet({ point, onClose, onSubmit }) {
     </form>
   </div>;
 }
+
+export const hasExistingPlaceDetails = (point) => Boolean(point.googleMapsUrl?.trim()
+  || point.locationNote?.trim() || point.memo?.trim() || isValidLocation(point.location));
 
 export function PlanInfoSheet({ plan, onClose, onSubmit }) {
   const [title, setTitle] = useState(plan.title ?? ''); const [date, setDate] = useState(plan.date ?? '');
@@ -450,7 +477,7 @@ function formatPlanDate(date) {
 
 export default function App() {
   const [plan, setPlan] = useState(loadPlan); const [candidateSheet, setCandidateSheet] = useState(null); const [pointSheetId, setPointSheetId] = useState(null); const [moveSheet, setMoveSheet] = useState(null); const [aiSegment, setAiSegment] = useState(null); const [isCreating, setIsCreating] = useState(false); const [isEditingPlan, setIsEditingPlan] = useState(false); const [saved, setSaved] = useState(true);
-  const [routeResults, setRouteResults] = useState({}); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
+  const [routeResults, setRouteResults] = useState(() => initialSampleRouteResults(plan)); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
   const [mapPicker, setMapPicker] = useState(null);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
@@ -475,6 +502,11 @@ export default function App() {
         continue;
       }
       const identity = routingIdentity(before, after, condition);
+      const sampleResult = initialSampleRouteResults(plan)[key];
+      if (sampleResult) {
+        setRouteResults((old) => ({ ...old, [key]: sampleResult }));
+        continue;
+      }
       const pending = cachedRouteRequest(routeCache.current, identity, () => {
         const controller = new AbortController();
         routeControllers.current.set(identity, controller);

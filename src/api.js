@@ -1,6 +1,7 @@
 import { isValidLocation, segmentKey } from './model';
 
 export const API_BASE_URL = 'https://drive-planner-api.takanori-tanaka0517.workers.dev';
+export const ROUTING_POLICY_VERSION = 'ors-v2';
 export const SESSION_STORAGE_KEY = 'drive-planner:ai-session:v1';
 export const ROUTING_V2_PATH = '/v2/routing/segment';
 export const ROUTING_V1_PATH = '/v1/routing/segment';
