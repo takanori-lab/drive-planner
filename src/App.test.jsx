@@ -23,6 +23,23 @@ describe('既存ドライブ編集UI', () => {
     expect(html).toContain('<span role="status"></span>');
   });
 
+  it('Routing結果に道路名がある場合だけ主な経路を表示し、legacy結果も表示できる', () => {
+    const props = { before: { name: '千葉駅' }, after: { name: '勝浦駅' }, candidates: [], condition: 'recommended', onCondition: () => undefined,
+      onAdd: () => undefined, onAsk: () => undefined, onEdit: () => undefined, onMove: () => undefined, onPromote: () => undefined,
+      onDelete: () => undefined, onSelectCandidateLocation: () => undefined, onClearCandidateLocation: () => undefined };
+    const withRoads = renderToStaticMarkup(<Segment {...props} routeResult={{ status: 'ok', distanceMeters: 42000, durationSeconds: 3600, majorRoads: ['国道A', '県道B'] }} />);
+    expect(withRoads).toContain('42 km ・ 約1時間');
+    expect(withRoads).toContain('主な経路: 国道A → 県道B');
+    for (const routeResult of [
+      { status: 'ok', distanceMeters: 42000, durationSeconds: 3600, majorRoads: [] },
+      { status: 'ok', distanceMeters: 42000, durationSeconds: 3600 },
+    ]) {
+      const html = renderToStaticMarkup(<Segment {...props} routeResult={routeResult} />);
+      expect(html).toContain('42 km ・ 約1時間');
+      expect(html).not.toContain('主な経路:');
+    }
+  });
+
   it('現在値入りのドライブ情報編集Sheetを表示する', () => {
     const html = renderToStaticMarkup(<PlanInfoSheet plan={{ title: '夏のドライブ', date: '2026-08-24' }} onClose={() => undefined} onSubmit={() => undefined} />);
     expect(html).toContain('ドライブ情報を編集');
