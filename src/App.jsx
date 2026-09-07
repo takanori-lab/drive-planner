@@ -481,6 +481,7 @@ export default function App() {
   const [routeResults, setRouteResults] = useState(() => initialSampleRouteResults(plan)); const routeCache = useRef(new Map()); const routeControllers = useRef(new Map());
   const [mapPicker, setMapPicker] = useState(null);
   const [routePreviewKey, setRoutePreviewKey] = useState(null);
+  const routePreviewTriggerRef = useRef(null);
   const start = plan.points[0];
   const goal = plan.points[plan.points.length - 1];
   const middlePoints = plan.points.slice(1, -1);
@@ -541,7 +542,7 @@ export default function App() {
     const after = plan.points[index + 1];
     const key = segmentKey(before, after);
     const condition = routingConditionForSegment(plan, before, after);
-    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onPreview={() => setRoutePreviewKey(key)} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} onSelectCandidateLocation={(candidateId) => setMapPicker({ kind: 'candidate', key, id: candidateId })} onClearCandidateLocation={(candidateId) => setPlan((old) => setCandidateLocation(old, key, candidateId, null))} />;
+    return <Segment before={before} after={after} candidates={plan.candidates[key] || []} routeResult={routeResults[key]} condition={condition} onCondition={(value) => setPlan((old) => setSegmentRoutingCondition(old, before, after, value))} onPreview={(event) => { routePreviewTriggerRef.current = event.currentTarget; setRoutePreviewKey(key); }} onAdd={() => setCandidateSheet({ mode: 'new', index })} onAsk={() => setAiSegment({ segmentIndex: index, beforeId: before.id, afterId: after.id })} onEdit={(candidateId) => setCandidateSheet({ mode: 'edit', index, candidateId })} onMove={(candidateId) => setMoveSheet({ fromKey: key, candidateId })} onPromote={(id) => setPlan((old) => insertCandidate(old, index, id))} onDelete={(id) => setPlan((old) => ({ ...old, candidates: { ...old.candidates, [key]: (old.candidates[key] || []).filter((c) => c.id !== id) } }))} onSelectCandidateLocation={(candidateId) => setMapPicker({ kind: 'candidate', key, id: candidateId })} onClearCandidateLocation={(candidateId) => setPlan((old) => setCandidateLocation(old, key, candidateId, null))} />;
   };
   const totalRoute = routeTotal(plan.points, routeResults);
   return <>
@@ -608,7 +609,7 @@ export default function App() {
       const index = plan.points.findIndex((point, pointIndex) => segmentKey(point, plan.points[pointIndex + 1] || {}) === routePreviewKey);
       const before = plan.points[index]; const after = plan.points[index + 1]; const routeResult = routeResults[routePreviewKey];
       if (!canPreviewRoute(before, after, routeResult)) return null;
-      return <RoutePreview before={before} after={after} routeResult={routeResult} onClose={() => setRoutePreviewKey(null)} />;
+      return <RoutePreview before={before} after={after} routeResult={routeResult} returnFocusRef={routePreviewTriggerRef} onClose={() => setRoutePreviewKey(null)} />;
     })()}
     {mapPicker && (() => {
       const place = mapPicker.kind === 'point' ? plan.points.find((item) => item.id === mapPicker.id)

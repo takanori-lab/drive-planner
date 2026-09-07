@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { canPreviewRoute, createRoutePreviewMap, normalizeRouteGeometry, routeBounds, RoutePreview } from './RoutePreview';
+import { canPreviewRoute, createRoutePreviewMap, handleRoutePreviewKeyDown, normalizeRouteGeometry, routeBounds, RoutePreview } from './RoutePreview';
 
 const before = { name: '出発地', location: { latitude: 35, longitude: 139 } };
 const after = { name: '到着地', location: { latitude: 36, longitude: 140 } };
@@ -37,10 +38,34 @@ describe('RoutePreview', () => {
   it('geometry全体から安全なboundsを計算する', () => {
     expect(routeBounds(geometry)).toEqual([[139.2, 35.1], [140.1, 36.1]]);
   });
+  it('日付変更線を跨ぐgeometryを短いlongitude範囲へunwrapする', () => {
+    const crossing = { type: 'LineString', coordinates: [[179.4, 45], [-179.7, 46], [-179.2, 44]] };
+    expect(routeBounds(crossing)).toEqual([[179.4, 44], [180.8, 46]]);
+  });
+  it('短いviewportでpanelをscroll可能にしmap高さを抑える', () => {
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(css).toContain('.route-preview{min-height:0;overflow-y:auto}');
+    expect(css).toContain('@media(max-height:500px){.route-preview{padding:10px}');
+    expect(css).toContain('.route-preview-map{height:35dvh;min-height:120px}');
+  });
   it('地点名、距離・時間、主な経路と閉じる操作を表示する', () => {
     const html = renderToStaticMarkup(<RoutePreview before={before} after={after} routeResult={result} onClose={() => undefined} />);
     expect(html).toContain('出発地 → 到着地'); expect(html).toContain('12.3 km ・ 約1時間5分');
     expect(html).toContain('主な経路: 国道1号 → 県道2号'); expect(html).toContain('aria-label="閉じる"');
+    expect(html).toContain('tabindex="-1"');
+  });
+  it('Escapeで閉じ、TabとShift+Tabをdialog内に閉じ込める', () => {
+    const first = { focus: vi.fn(), hidden: false }; const last = { focus: vi.fn(), hidden: false };
+    const dialog = { querySelectorAll: vi.fn(() => [first, last]), focus: vi.fn() }; const onClose = vi.fn();
+    const preventDefault = vi.fn();
+    handleRoutePreviewKeyDown({ key: 'Escape', preventDefault }, dialog, onClose, { activeElement: first });
+    expect(preventDefault).toHaveBeenCalled(); expect(onClose).toHaveBeenCalledOnce();
+    preventDefault.mockClear();
+    handleRoutePreviewKeyDown({ key: 'Tab', shiftKey: false, preventDefault }, dialog, onClose, { activeElement: last });
+    expect(preventDefault).toHaveBeenCalled(); expect(first.focus).toHaveBeenCalled();
+    preventDefault.mockClear();
+    handleRoutePreviewKeyDown({ key: 'Tab', shiftKey: true, preventDefault }, dialog, onClose, { activeElement: first });
+    expect(preventDefault).toHaveBeenCalled(); expect(last.focus).toHaveBeenCalled();
   });
   it('LineString Feature source、line layer、確認済み地点marker、全体viewportを設定する', () => {
     const fake = fakeMapLibre();

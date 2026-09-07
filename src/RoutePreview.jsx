@@ -18,7 +18,16 @@ export function normalizeRouteGeometry(geometry) {
 export const routeBounds = (geometry) => {
   const valid = normalizeRouteGeometry(geometry);
   if (!valid) return null;
-  return valid.coordinates.reduce((bounds, [longitude, latitude]) => [
+  let previousLongitude = valid.coordinates[0][0];
+  const unwrapped = valid.coordinates.map(([longitude, latitude], index) => {
+    if (index === 0) return [longitude, latitude];
+    let nextLongitude = longitude;
+    while (nextLongitude - previousLongitude > 180) nextLongitude -= 360;
+    while (nextLongitude - previousLongitude < -180) nextLongitude += 360;
+    previousLongitude = nextLongitude;
+    return [nextLongitude, latitude];
+  });
+  return unwrapped.reduce((bounds, [longitude, latitude]) => [
     [Math.min(bounds[0][0], longitude), Math.min(bounds[0][1], latitude)],
     [Math.max(bounds[1][0], longitude), Math.max(bounds[1][1], latitude)],
   ], [[Infinity, Infinity], [-Infinity, -Infinity]]);
@@ -27,6 +36,18 @@ export const routeBounds = (geometry) => {
 export function canPreviewRoute(before, after, routeResult) {
   return routeResult?.status === 'ok' && Boolean(normalizeRouteGeometry(routeResult.geometry))
     && isValidLocation(before?.location) && isValidLocation(after?.location);
+}
+
+const FOCUSABLE_SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function handleRoutePreviewKeyDown(event, dialog, onClose, documentObject = document) {
+  if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+  if (event.key !== 'Tab') return;
+  const focusable = [...dialog.querySelectorAll(FOCUSABLE_SELECTOR)].filter((element) => !element.hidden);
+  if (!focusable.length) { event.preventDefault(); dialog.focus(); return; }
+  const first = focusable[0]; const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (documentObject.activeElement === first || documentObject.activeElement === dialog)) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && documentObject.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 
 function markerElement(documentObject, label, kind) {
@@ -54,9 +75,14 @@ export function createRoutePreviewMap(maplibre, container, geometry, start, end,
   return { map, markers };
 }
 
-export function RoutePreview({ before, after, routeResult, onClose, mapLoader = loadMapLibre }) {
+export function RoutePreview({ before, after, routeResult, onClose, returnFocusRef, mapLoader = loadMapLibre }) {
   const containerRef = useRef(null); const mapRef = useRef(null); const markersRef = useRef([]);
+  const dialogRef = useRef(null);
   const [mapError, setMapError] = useState('');
+  useEffect(() => {
+    dialogRef.current?.focus();
+    return () => returnFocusRef?.current?.focus();
+  }, [returnFocusRef]);
   useEffect(() => {
     let disposed = false;
     mapLoader().then((maplibre) => {
@@ -70,7 +96,7 @@ export function RoutePreview({ before, after, routeResult, onClose, mapLoader = 
     return () => { disposed = true; markersRef.current.forEach((marker) => marker.remove()); mapRef.current?.remove(); };
   }, [before, after, routeResult, mapLoader]);
   return <div className="route-preview-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="route-preview" role="dialog" aria-modal="true" aria-labelledby="route-preview-title">
+    <section ref={dialogRef} className="route-preview" role="dialog" aria-modal="true" aria-labelledby="route-preview-title" tabIndex="-1" onKeyDown={(event) => handleRoutePreviewKeyDown(event, dialogRef.current, onClose)}>
       <header><div><span className="eyebrow">ROUTE PREVIEW</span><h2 id="route-preview-title">{before.name} → {after.name}</h2></div><button type="button" className="close" aria-label="閉じる" onClick={onClose}>×</button></header>
       <div className="route-preview-details"><strong>{formatDistance(routeResult.distanceMeters)} ・ 約{formatDuration(routeResult.durationSeconds)}</strong>{routeResult.majorRoads?.length > 0 && <small>主な経路: {routeResult.majorRoads.join(' → ')}</small>}</div>
       <div className="route-preview-map" ref={containerRef} aria-label={`${before.name}から${after.name}までの経路地図`} />
