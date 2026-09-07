@@ -104,9 +104,10 @@ it('routing identityは座標と条件だけに依存する', async () => {
 
 it('初期サンプルだけはAPI不要の距離・時間を持つ', () => {
   expect(initialSampleRouteResults(initialPlan())).toEqual({
-    'tokyo-start::kawaguchiko': { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 },
-    'kawaguchiko::tokyo-goal': { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 },
+    'tokyo-start::kawaguchiko': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+    'kawaguchiko::tokyo-goal': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
   });
+  expect(initialSampleRouteResults(initialPlan(), 'ors-v3')).toEqual({});
   const normal = createPlan({ title: '旅', date: '2026-09-01', startName: '東京駅', mainName: '河口湖駅', goalName: '東京駅' });
   expect(initialSampleRouteResults(normal)).toEqual({});
   expect(initialSampleRouteResults({ ...initialPlan(), routingCondition: 'local_roads' })).toEqual({});

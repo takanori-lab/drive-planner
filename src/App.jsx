@@ -4,7 +4,7 @@ import { KeyboardSensor, PointerActivationConstraints, PointerSensor } from '@dn
 import { useEffect, useRef, useState } from 'react';
 import { addAiResultsToSegment, buildGoogleMapsSearchUrl, createPlan, initialPlan, insertCandidate, isDraggable, isRemovable, isValidLocation, makeId, moveCandidate, normalizePlanMapsUrls, removePoint, reorderPoint, routeTotal, routingConditionForSegment, safeGoogleMapsUrl, segmentKey, setCandidateLocation, setPlanRoutingCondition, setPointLocation, setSegmentRoutingCondition, STORAGE_KEY, updateCandidate, updatePlanInfo, updatePoint } from './model';
 import { MapPicker } from './MapPicker';
-import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
+import { buildAiRequestBody, clearSession, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, ROUTING_POLICY_VERSION, saveSession, sessionExpiredWhileSheetOpen, WorkerApiError } from './api';
 
 const sensors = [
   PointerSensor.configure({
@@ -163,12 +163,17 @@ export const routingIdentity = (before, after, condition) => JSON.stringify([
   after.location?.latitude, after.location?.longitude, condition,
 ]);
 
+// Regenerate the sample metrics when ROUTING_POLICY_VERSION changes, then
+// update this recorded version. A mismatch deliberately falls back to the API.
 const SAMPLE_ROUTE_RESULTS = {
-  'tokyo-start::kawaguchiko': { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 },
-  'kawaguchiko::tokyo-goal': { status: 'ok', distanceMeters: 112000, durationSeconds: 6600 },
+  routingPolicyVersion: 'ors-v2',
+  segments: {
+    'tokyo-start::kawaguchiko': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+    'kawaguchiko::tokyo-goal': { status: 'ok', routingPolicyVersion: 'ors-v2', distanceMeters: 112000, durationSeconds: 6600 },
+  },
 };
 
-export function initialSampleRouteResults(plan) {
+export function initialSampleRouteResults(plan, routingPolicyVersion = ROUTING_POLICY_VERSION) {
   const sample = initialPlan();
   const isSample = plan.title === sample.title
     && plan.routingCondition === sample.routingCondition
@@ -178,7 +183,8 @@ export function initialSampleRouteResults(plan) {
       && point.name === sample.points[index].name
       && point.location?.latitude === sample.points[index].location.latitude
       && point.location?.longitude === sample.points[index].location.longitude);
-  return isSample ? SAMPLE_ROUTE_RESULTS : {};
+  return isSample && SAMPLE_ROUTE_RESULTS.routingPolicyVersion === routingPolicyVersion
+    ? SAMPLE_ROUTE_RESULTS.segments : {};
 }
 
 export function Segment({ before, after, candidates, routeResult, condition, onCondition, onAdd, onAsk, onEdit, onMove, onPromote, onDelete, onSelectCandidateLocation, onClearCandidateLocation }) {
