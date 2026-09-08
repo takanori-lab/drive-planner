@@ -10,7 +10,7 @@ export const OPENAI_TIMEOUT_MS = 45_000;
 const candidateSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['name', 'locationHint', 'description', 'reason', 'detourLevel', 'detourNote', 'checkItems'],
+  required: ['name', 'locationHint', 'description', 'reason', 'detourLevel', 'detourNote', 'checkItems', 'referenceLocation'],
   properties: {
     name: { type: 'string', minLength: 1, maxLength: 120 },
     locationHint: { type: 'string', minLength: 1, maxLength: 300 },
@@ -19,6 +19,12 @@ const candidateSchema = {
     detourLevel: { type: 'string', enum: ['small', 'medium', 'large'] },
     detourNote: { type: 'string', minLength: 1, maxLength: 300 },
     checkItems: { type: 'array', maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 200 } },
+    referenceLocation: { anyOf: [
+      { type: 'object', additionalProperties: false, required: ['latitude', 'longitude'], properties: {
+        latitude: { type: 'number', minimum: -90, maximum: 90 }, longitude: { type: 'number', minimum: -180, maximum: 180 },
+      } },
+      { type: 'null' },
+    ] },
   },
 } as const;
 
@@ -38,26 +44,29 @@ export const OUTPUT_FORMAT = {
   },
 } as const;
 
-export const PROMPT_VERSION = 'segment-candidates-v2';
-export const INSTRUCTIONS = `あなたはDrive Plannerの寄り道候補を提案します。確定地点AからBの間で、車だからこそ寄りやすく、予定外でも面白そうな候補を探してください。
+export const PROMPT_VERSION = 'segment-candidates-v3';
+export const INSTRUCTIONS = `あなたはDrive Plannerの寄り道候補を提案します。車で立ち寄りやすく、予定外でも面白い場所を探してください。
 
-【情報の優先順位】今回の地理的探索範囲は常にsegment.before → segment.afterが最優先です。A→Bの位置関係から自然に考えられる移動範囲だけを「どこで探すか」の基準にしてください。MAIN地点とplan.titleはドライブに合う雰囲気・候補の種類を考える補助情報であり、MAINを経由地点として扱ったり、MAINへ近づくよう探索範囲を曲げたりしてはいけません。特にMAINがA/Bでない場合、MAINを通るルートを勝手に想定しないでください。freeTextは「何を探すか」に強く反映してよい一方、A→Bの地理的探索範囲を変更してはいけません。
+【探索範囲の優先順位】routeContext.sourceがorsなら、sampledCoordinatesが表す取得済みORS実ルートとmajorRoadsを最優先の探索範囲にします。geographic_inferenceならsegment.before → segment.afterの位置関係から自然な地理範囲を最優先にします。面白くても遠い場所より今回の経路に自然な場所を選び、5件を揃えるため範囲を広げません。MAINとplan.titleはテーマ・候補種類の補助情報に限り、MAINを経由地点や探索経路として扱いません。freeTextは「何を探すか」へ強く反映しても探索範囲を変えません。
 
-【候補選定】A→Bの自然な移動範囲で、少し変わった施設・場所、景色のよい場所や道、地元らしい場所、食べ物、ニッチな場所を重視し、有名観光地だけを機械的に並べず、既存候補との重複を避けてください。実際のナビルートを確認したかのように断定せず、特定の高速道路・道路を通る場合にしか成立しない候補は優先しないでください。互いに大きく異なる経路を前提とする候補を同じ5件に混ぜないでください。経路依存の候補しか思いつかない場合は、遠方よりA/B付近、A→Bの大まかな間、短時間で寄れそうな小規模スポットを優先してください。「候補として面白いが遠い」より「派手ではないがA→Bの途中として自然」を優先し、5件を揃えるために遠方・区間外へ探索範囲を広げてはいけません。
+【希望の解釈】包含と除外を区別します。「ラーメン以外も」「ラーメンだけでなく」はラーメンを含めた多様化であり除外ではありません。「ラーメン以外がいい」「ラーメンは除外して」のような明示的指示だけを除外として扱います。
 
-candidate.reasonには場所自体の魅力だけでなく、なぜ今回のsegment.before → segment.afterの寄り道として適しているかを書き、未確認の道路ルートを事実のように断定しないでください。
+【候補】少し変わった施設、景勝地、地元の食やニッチな場所を重視し、有名地だけを並べず既存候補と重複させません。原則、ユーザーがそのまま選べる具体的な店舗・施設・地点を出し、具体地点を出せるのに「○○駅周辺の飲食店」のような曖昧な地域へ逃げません。商店街、市場、公園、景勝地などエリア自体が立ち寄り先なら許容し、5件の粒度を極端にばらつかせません。reasonには魅力と今回の経路の寄り道に適する理由を簡潔に書きます。
 
-【detourLevel】smallはA→Bの自然な移動範囲からほとんど外れず短い追加移動で立ち寄れそう、mediumはA→Bの流れを維持できるが明確な寄り道・追加移動が発生しそう、largeはA→Bの自然な流れからかなり外れる可能性がある、別方向への移動が必要、またはかなり大きな寄り道になりそう、という基準です。正確な所要時間を知っているかのような数値断定は避け、迷う場合は寄り道量を過小評価しないでください。detourNoteをこの判定と矛盾させず、大きく迂回する可能性や大きな寄り道と記す候補へ安易にsmallを付けないでください。
+detourLevelはsmall=自然な範囲からほぼ外れない、medium=流れを保つが明確な追加移動、large=かなり外れる可能性または別方向への大きな寄り道です。detourNoteと整合させ、正確な追加時間・距離を推測・断定せず、迷えば過小評価しません。
 
-checkItemsは候補固有で事前確認の価値が高い事項（開催日、遊歩道状況、上下線・進行方向、季節営業など）を原則0～3件で簡潔にし、営業時間・駐車場・混雑・雨天など同じ項目を全候補へ機械的に繰り返さないでください。重要事項がなければ空配列で構いません。
+checkItemsは開催日、遊歩道、進行方向、季節営業など候補固有で事前確認価値が高い事項を0～3件程度にし、一般的な営業時間・混雑・駐車場等を全候補へ機械的に反復しません。
 
-【地点特定と情報の制約】Web Searchは使用できません。あなた自身がgoogleMapsUrlを開いた、検索した、確認したとは絶対に表現せず、元の短縮URL文字列だけから場所を推測しないでください。Workerが安全にリダイレクトを解決しURLから抽出したresolvedGoogleMapsContextがある場合は、通常の地点情報として場所の特定に利用できます。解決情報もなく、地点名、locationNote、memoだけでsegment.beforeまたはsegment.afterの具体的な場所を十分特定できない場合は、別の場所を想定せずneeds_clarificationを返してください。MAINがA/Bとは別地点なら、MAINだけが曖昧であることを理由にneeds_clarificationを返さず、特定できる範囲だけでテーマ・候補種類の補助情報として利用してください。MAINそのものがsegment.beforeまたはsegment.afterの場合は、その地点をA/Bとして十分特定できる必要があります。営業時間、営業日、道路状況などの最新情報を確認済みと表現せず、候補固有で確認が必要な内容だけをcheckItemsへ入れてください。
+referenceLocationは地点を十分推定できる場合だけ有効範囲の緯度経度を返し、不確かならnullにします。これは参考情報で、確認済みlocation、正確な入口・駐車場位置、Routing用座標ではありません。
 
-正常時は候補を必ず5件、clarificationMessageは空文字にしてください。確認が必要な場合は候補を0件にし、具体的なclarificationMessageを返してください。`;
+【安全制約】Web Searchは使用できません。googleMapsUrlを開いた・検索した・確認したと表現せず、短縮URL文字列だけで推測しません。Workerが安全に解決したresolvedGoogleMapsContextは地点特定に使えます。routeContext.sourceがorsで有効なsampledCoordinatesがあれば、その始終点位置をA/B特定の根拠とし、before/afterの文字情報が曖昧という理由だけでneeds_clarificationにしません。geographic_inferenceで解決情報もなく地点名、locationNote、memoからA/Bを十分特定できなければ、別地点を想定せずneeds_clarificationを返します。A/BでないMAINの曖昧さだけでは確認を求めず、MAINがA/Bなら十分な特定が必要です。最新の営業・道路状況を確認済みと表現しません。
+
+正常時はreason、detourLevel、detourNote、checkItemsを持つ候補を必ず5件返しclarificationMessageは空文字にします。確認が必要なら候補0件と具体的なclarificationMessageを返します。`;
 
 type Candidate = {
   name: string; locationHint: string; description: string; reason: string;
   detourLevel: 'small' | 'medium' | 'large'; detourNote: string; checkItems: string[];
+  referenceLocation: { latitude: number; longitude: number } | null;
 };
 export type GeneratedCandidates =
   | { status: 'ok'; clarificationMessage: ''; candidates: Candidate[] }
@@ -87,11 +96,17 @@ function validateOutput(value: unknown): GeneratedCandidates {
   const candidates = root.candidates.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) invalidResponse();
     const c = item as Record<string, unknown>;
-    const keys = ['name', 'locationHint', 'description', 'reason', 'detourLevel', 'detourNote', 'checkItems'];
+    const keys = ['name', 'locationHint', 'description', 'reason', 'detourLevel', 'detourNote', 'checkItems', 'referenceLocation'];
+    const reference = c.referenceLocation;
     if (Object.keys(c).length !== keys.length || keys.some((key) => !(key in c)) || !validString(c.name, 1, 120)
       || !validString(c.locationHint, 1, 300) || !validString(c.description, 1, 600) || !validString(c.reason, 1, 600)
       || !['small', 'medium', 'large'].includes(c.detourLevel as string) || !validString(c.detourNote, 1, 300)
-      || !Array.isArray(c.checkItems) || c.checkItems.length > 8 || !c.checkItems.every((x) => validString(x, 1, 200))) invalidResponse();
+      || !Array.isArray(c.checkItems) || c.checkItems.length > 8 || !c.checkItems.every((x) => validString(x, 1, 200))
+      || !(reference === null || (reference && typeof reference === 'object' && !Array.isArray(reference)
+        && Object.keys(reference).length === 2 && Number.isFinite((reference as Record<string, unknown>).latitude)
+        && Number.isFinite((reference as Record<string, unknown>).longitude)
+        && (reference as { latitude: number }).latitude >= -90 && (reference as { latitude: number }).latitude <= 90
+        && (reference as { longitude: number }).longitude >= -180 && (reference as { longitude: number }).longitude <= 180))) invalidResponse();
     return c as Candidate;
   });
   if (root.status === 'ok' && root.clarificationMessage === '' && candidates.length === 5) return { status: 'ok', clarificationMessage: '', candidates };

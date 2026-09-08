@@ -214,10 +214,10 @@ export async function authenticateCandidateSession(passcode) {
   return created;
 }
 
-export async function requestSegmentCandidates(plan, segmentIndex, extraRequest, displayedSession) {
+export async function requestSegmentCandidates(plan, segmentIndex, extraRequest, displayedSession, routeResult, routingCondition) {
   const current = readSession();
   if (sessionExpiredWhileSheetOpen(displayedSession, current) || !current) return { expired: true };
-  return { expired: false, result: await fetchAiCandidates(current.token, buildAiRequestBody(plan, segmentIndex, extraRequest.trim())) };
+  return { expired: false, result: await fetchAiCandidates(current.token, buildAiRequestBody(plan, segmentIndex, extraRequest.trim(), undefined, routeResult, routingCondition)) };
 }
 
 export const candidateLoadingMessage = (session) => session ? '候補を探しています…' : '確認しています…';
@@ -274,7 +274,7 @@ export function AiCandidateResults({ result, selectedIndexes = [], onToggle = ()
   </section>;
 }
 
-export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => ({ segmentFound: true, addedCount: 0, duplicateCount: 0 }), onClose, initialResult = null }) {
+export function AiCandidateSheet({ plan, segmentIndex, routeResult, routingCondition, onAddCandidates = () => ({ segmentFound: true, addedCount: 0, duplicateCount: 0 }), onClose, initialResult = null }) {
   const [extraRequest, setExtraRequest] = useState('');
   const [passcode, setPasscode] = useState('');
   const [session, setSession] = useState(() => readSession());
@@ -327,7 +327,7 @@ export function AiCandidateSheet({ plan, segmentIndex, onAddCandidates = () => (
     setSelectedIndexes([]);
     setAddMessage('');
     try {
-      const response = await requestSegmentCandidates(plan, segmentIndex, extraRequest, session);
+      const response = await requestSegmentCandidates(plan, segmentIndex, extraRequest, session, routeResult, routingCondition);
       if (response.expired) {
         setSession(null);
         setError('認証の有効期限が切れました。パスコードを入力してください。');
@@ -624,7 +624,9 @@ export default function App() {
     {aiSegment !== null && (() => {
       const segmentIndex = plan.points.findIndex((point, index) => point.id === aiSegment.beforeId && plan.points[index + 1]?.id === aiSegment.afterId);
       const safeIndex = segmentIndex >= 0 ? segmentIndex : aiSegment.segmentIndex;
-      return <AiCandidateSheet plan={plan} segmentIndex={safeIndex} onAddCandidates={(results) => {
+      const before = plan.points[safeIndex]; const after = plan.points[safeIndex + 1];
+      const key = before && after ? segmentKey(before, after) : '';
+      return <AiCandidateSheet plan={plan} segmentIndex={safeIndex} routeResult={routeResults[key]} routingCondition={before && after ? routingConditionForSegment(plan, before, after) : plan.routingCondition} onAddCandidates={(results) => {
         const outcome = addAiResultsToSegment(plan, aiSegment.beforeId, aiSegment.afterId, results);
         if (outcome.plan !== plan) setPlan(outcome.plan);
         return outcome;

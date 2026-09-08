@@ -35,7 +35,7 @@ function environment(options: { sessionAllowed?: boolean; aiAllowed?: boolean; r
 
 const candidate = (index: number) => ({
   name: `候補${index}`, locationHint: `地域${index}`, description: `説明${index}`, reason: `理由${index}`,
-  detourLevel: 'small', detourNote: `寄り道${index}`, checkItems: [`確認${index}`],
+  detourLevel: 'small', detourNote: `寄り道${index}`, checkItems: [`確認${index}`], referenceLocation: null,
 });
 
 function openAiOutput(value: unknown, overrides: Record<string, unknown> = {}): Response {
@@ -52,6 +52,7 @@ function fixture() {
     requestId: '5eca122f-c098-4690-9575-5e906c3f86af',
     plan: { title: '富士山周辺ドライブ', date: '2026-08-29', mainPoint: point('富士山') },
     segment: { before: point('東京駅'), after: point('河口湖') },
+    routeContext: { source: 'geographic_inference', routingCondition: 'recommended', distanceMeters: null, durationSeconds: null, majorRoads: [], sampledCoordinates: [] },
     existingCandidates: [{ name: '候補例', locationNote: '' }],
     preferences: { freeText: '景色がいいところ', useWebSearch: false },
   };
@@ -254,18 +255,20 @@ describe('Drive Planner Worker', () => {
     expect(request).toMatchObject({ model: 'gpt-5.6-luna', reasoning: { effort: 'medium' }, store: true,
       metadata: { app: 'drive-planner', feature: 'segment-candidates' }, max_output_tokens: 4000,
       text: { format: { type: 'json_schema', name: 'drive_planner_segment_candidates', strict: true } } });
-    expect(PROMPT_VERSION).toBe('segment-candidates-v2');
+    expect(PROMPT_VERSION).toBe('segment-candidates-v3');
     expect(request.instructions).toBe(INSTRUCTIONS);
     for (const rule of [
-      'segment.before → segment.afterが最優先',
-      'MAINを経由地点として扱ったり',
-      'freeTextは「何を探すか」に強く反映してよい一方、A→Bの地理的探索範囲を変更してはいけません',
-      'smallはA→Bの自然な移動範囲からほとんど外れず',
-      'mediumはA→Bの流れを維持できるが明確な寄り道・追加移動',
-      'largeはA→Bの自然な流れからかなり外れる可能性',
-      '5件を揃えるために遠方・区間外へ探索範囲を広げてはいけません',
+      'routeContext.sourceがors',
+      '始終点位置をA/B特定の根拠とし',
+      '文字情報が曖昧という理由だけでneeds_clarificationにしません',
+      'MAINを経由地点や探索経路として扱いません',
+      'freeTextは「何を探すか」へ強く反映しても探索範囲を変えません',
+      '「ラーメン以外も」「ラーメンだけでなく」はラーメンを含めた多様化',
+      '「ラーメン以外がいい」「ラーメンは除外して」',
+      'small=自然な範囲からほぼ外れない',
+      '5件を揃えるため範囲を広げません',
       'needs_clarification',
-      'MAINだけが曖昧であることを理由にneeds_clarificationを返さず',
+      'A/BでないMAINの曖昧さだけでは確認を求めず',
       'resolvedGoogleMapsContext',
       'Web Searchは使用できません',
     ]) expect(request.instructions).toContain(rule);
@@ -284,6 +287,19 @@ describe('Drive Planner Worker', () => {
     expect(sent).toEqual({ ...fixture(), resolvedGoogleMapsContext: {} });
     expect(request.input).not.toContain('localStorage');
     expect(request.input).not.toContain('internalId');
+  });
+
+  it('旧FrontendのrouteContextなし入力を地理推定として受け付ける', async () => {
+    const env = environment();
+    const legacyInput = fixture() as Record<string, unknown>;
+    delete legacyInput.routeContext;
+    const response = await handleRequest(post(aiEndpoint, legacyInput, { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(200);
+    const openAiRequest = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(JSON.parse(openAiRequest.input).routeContext).toEqual({
+      source: 'geographic_inference', routingCondition: 'recommended', distanceMeters: null,
+      durationSeconds: null, majorRoads: [], sampledCoordinates: [],
+    });
   });
 
   it('解決したGoogle Maps地点情報をOpenAI入力へ追加し、GoogleへSecretを送らない', async () => {
@@ -432,6 +448,9 @@ describe('Drive Planner Worker', () => {
 
   it.each([
     ['候補数が4件', openAiOutput({ status: 'ok', clarificationMessage: '', candidates: Array.from({ length: 4 }, (_, i) => candidate(i)) })],
+    ['範囲外の参考座標', openAiOutput({ status: 'ok', clarificationMessage: '', candidates: [
+      { ...candidate(1), referenceLocation: { latitude: 91, longitude: 139 } }, ...Array.from({ length: 4 }, (_, i) => candidate(i + 2)),
+    ] })],
     ['malformed JSON', Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '{broken' }] }] })],
     ['refusal', Response.json({ status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal', refusal: '不可' }] }] })],
     ['incomplete', Response.json({ status: 'incomplete', output: [] })],
