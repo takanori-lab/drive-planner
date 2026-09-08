@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildAiRequestBody, buildRoutingRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
+import { buildAiRequestBody, buildRoutingRequestBody, createSession, fetchAiCandidates, fetchSegmentRoute, readSession, sampleRouteCoordinates, saveSession, sessionExpiredWhileSheetOpen, SESSION_STORAGE_KEY, WorkerApiError } from './api';
 import { extractGoogleMapsPlace } from '../worker/src/google-maps';
 
 const plan = {
   title: 'テスト旅行',
   points: [
-    { id: 'secret-a', name: '出発', googleMapsUrl: 'https://maps.example/a', locationNote: '東口', memo: '朝', locked: 'start' },
-    { id: 'secret-main', name: '目的地', googleMapsUrl: '', locationNote: '湖畔', memo: '', locked: 'main' },
+    { id: 'secret-a', name: '出発', googleMapsUrl: 'https://maps.example/a', locationNote: '東口', memo: '朝', location: { latitude: 30, longitude: 130 }, locked: 'start' },
+    { id: 'secret-main', name: '目的地', googleMapsUrl: '', locationNote: '湖畔', memo: '', location: { latitude: 31, longitude: 131 }, locked: 'main' },
     { id: 'secret-b', name: '到着', googleMapsUrl: '', locationNote: '', memo: '夕方', locked: 'goal' },
   ],
   candidates: {
@@ -25,10 +25,37 @@ describe('AI request body', () => {
         before: { name: '出発', googleMapsUrl: 'https://maps.example/a', locationNote: '東口', memo: '朝' },
         after: { name: '目的地', googleMapsUrl: '', locationNote: '湖畔', memo: '' },
       },
+      routeContext: { source: 'geographic_inference', routingCondition: 'recommended', distanceMeters: null, durationSeconds: null, majorRoads: [], sampledCoordinates: [] },
       existingCandidates: [{ name: '既存候補', locationNote: '駅前' }],
       preferences: { freeText: '静かな場所', useWebSearch: false },
     });
     expect(JSON.stringify(body)).not.toMatch(/secret-|locked|localStorage|token/);
+  });
+
+  it('既存ORS geometryを端点込み最大20点に均等サンプリングする', () => {
+    const coordinates = Array.from({ length: 101 }, (_, index) => [130 + index / 100, 30 + index / 100]);
+    const routeResult = { status: 'ok', distanceMeters: 1234, durationSeconds: 567, majorRoads: ['国道1号'], geometry: { type: 'LineString', coordinates } };
+    const body = buildAiRequestBody(plan, 0, '', () => 'request', routeResult, 'local_roads');
+    expect(body.routeContext).toMatchObject({ source: 'ors', routingCondition: 'local_roads', distanceMeters: 1234, durationSeconds: 567, majorRoads: ['国道1号'] });
+    expect(body.routeContext.sampledCoordinates).toHaveLength(20);
+    expect(body.routeContext.sampledCoordinates[0]).toEqual({ longitude: 130, latitude: 30 });
+    expect(body.routeContext.sampledCoordinates.at(-1)).toEqual({ longitude: 131, latitude: 31 });
+    expect(body.routeContext.sampledCoordinates[10].longitude).toBeGreaterThan(130.4);
+    expect(body.routeContext.sampledCoordinates[10].longitude).toBeLessThan(130.7);
+  });
+
+  it.each([
+    [undefined, 'routeResult未取得'], [{ status: 'loading' }, 'loading'], [{ status: 'error' }, 'error'],
+    [{ status: 'ok', geometry: null }, 'geometryなし'], [{ status: 'ok', geometry: { type: 'LineString', coordinates: [[181, 35], [139, 36]] } }, '不正geometry'],
+  ])('%s (%s) は追加Routingなしで地理推定へfallbackする', (routeResult) => {
+    expect(buildAiRequestBody(plan, 0, '', () => 'request', routeResult).routeContext.source).toBe('geographic_inference');
+  });
+
+  it('未確定locationでは有効geometryがあっても地理推定へfallbackする', () => {
+    const withoutLocation = { ...plan, points: plan.points.map((point) => ({ ...point, location: null })) };
+    const routeResult = { status: 'ok', geometry: { type: 'LineString', coordinates: [[139, 35], [140, 36]] } };
+    expect(buildAiRequestBody(withoutLocation, 0, '', () => 'request', routeResult).routeContext.source).toBe('geographic_inference');
+    expect(sampleRouteCoordinates(routeResult.geometry)).toHaveLength(2);
   });
 });
 

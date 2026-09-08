@@ -48,12 +48,17 @@ describe('plan model', () => {
     ...overrides,
   });
 
-  it('AI resultを通常candidateの項目だけへ変換する', () => {
-    const converted = aiResultToCandidate(aiResult(' 湖畔のパン屋 '));
-    expect(Object.keys(converted)).toEqual(['id', 'name', 'googleMapsUrl', 'locationNote', 'memo', 'location']);
+  it('AI参考座標をlocationへ昇格せず別フィールドで保持する', () => {
+    const converted = aiResultToCandidate(aiResult(' 湖畔のパン屋 ', { referenceLocation: { latitude: 35.5, longitude: 138.7 } }));
+    expect(Object.keys(converted)).toEqual(['id', 'name', 'googleMapsUrl', 'locationNote', 'memo', 'location', 'referenceLocation']);
     expect(converted.id).not.toBe('ai- 湖畔のパン屋 ');
-    expect(converted).toMatchObject({ name: '湖畔のパン屋', googleMapsUrl: '', locationNote: '山梨県都留市' });
+    expect(converted).toMatchObject({ name: '湖畔のパン屋', googleMapsUrl: '', locationNote: '山梨県都留市', location: null,
+      referenceLocation: { latitude: 35.5, longitude: 138.7 } });
     expect(converted.memo).toBe('湖を眺められる小さなパン屋です。\n寄る理由：通り道から立ち寄りやすいため。\n寄り道 小：所要15分ほど\n確認：営業時間を確認 / 駐車場を確認');
+  });
+
+  it('不正なAI参考座標を保存しない', () => {
+    expect(aiResultToCandidate(aiResult('候補', { referenceLocation: { latitude: 91, longitude: 139 } })).referenceLocation).toBeNull();
   });
 
   it('空情報に不自然な区切りを作らずmemoを200文字以内にする', () => {

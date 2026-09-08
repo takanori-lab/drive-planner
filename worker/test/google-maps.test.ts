@@ -9,6 +9,7 @@ const input = (url = ''): SegmentCandidatesRequest => ({
     before: { name: 'A', googleMapsUrl: url, locationNote: '', memo: '' },
     after: { name: 'B', googleMapsUrl: '', locationNote: '', memo: '' },
   },
+  routeContext: { source: 'geographic_inference', routingCondition: 'recommended', distanceMeters: null, durationSeconds: null, majorRoads: [], sampledCoordinates: [] },
   existingCandidates: [], preferences: { freeText: '', useWebSearch: false },
 });
 

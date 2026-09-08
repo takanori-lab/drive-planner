@@ -102,6 +102,7 @@ export function aiResultToCandidate(result) {
     locationNote: compactText(result?.locationHint),
     memo: buildCompactCandidateMemo(result),
     location: null,
+    referenceLocation: normalizeLocation(result?.referenceLocation),
   };
 }
 
