@@ -29,8 +29,18 @@ describe('MapPicker', () => {
     expect(html).toContain('value=""'); expect(html).toContain('この場所に決定'); expect(html).toContain('disabled=""');
   });
   it('指定済み座標を入力へ同期して決定可能にする', () => {
-    const html = renderToStaticMarkup(<MapPicker place={{ name: '勝浦駅', location: { latitude: 35.15, longitude: 140.31 } }} onCancel={() => undefined} onConfirm={() => undefined} />);
+    const html = renderToStaticMarkup(<MapPicker place={{ name: '勝浦駅', location: { latitude: 35.15, longitude: 140.31 }, referenceLocation: { latitude: 35.2, longitude: 140.4 } }} onCancel={() => undefined} onConfirm={() => undefined} />);
     expect(html).toContain('value="35.15"'); expect(html).toContain('value="140.31"'); expect(html).not.toContain('class="primary" disabled');
+    expect(html).not.toContain('AI参考位置'); expect(html).not.toContain('この参考位置を選択');
+  });
+  it('有効なAI参考位置は案内と選択操作を表示するがdraftにはしない', () => {
+    const html = renderToStaticMarkup(<MapPicker place={{ name: '勝浦駅', location: null, referenceLocation: { latitude: 35.15, longitude: 140.31 } }} onCancel={() => undefined} onConfirm={() => undefined} />);
+    expect(html).toContain('AIによる参考位置です。正しい場所か地図で確認してください。');
+    expect(html).toContain('この参考位置を選択'); expect(html).toContain('value=""'); expect(html).toContain('disabled=""');
+  });
+  it('不正なAI参考位置は未指定時の表示へfallbackする', () => {
+    const html = renderToStaticMarkup(<MapPicker place={{ name: '勝浦駅', location: null, referenceLocation: { latitude: 91, longitude: 140.31 } }} onCancel={() => undefined} onConfirm={() => undefined} />);
+    expect(html).not.toContain('AI参考位置'); expect(html).not.toContain('この参考位置を選択'); expect(html).toContain('disabled=""');
   });
   it('pointerを使わない入力でも両方が有効な場合だけdraft座標を作る', () => {
     expect(locationFromCoordinateInputs('35.15', '140.31')).toEqual({ latitude: 35.15, longitude: 140.31 });
@@ -58,6 +68,16 @@ describe('MapPicker', () => {
     createMapForDraft(maplibre, 'map-container', null);
     expect(maplibre.Map).toHaveBeenCalledWith(expect.objectContaining(DEFAULT_MAP_VIEW)); expect(maplibre.Marker).not.toHaveBeenCalled();
   });
+  it('draftなしではAI参考位置を中心に専用markerを置き、通常markerとは分離する', () => {
+    const map = {}; const referenceMarker = { setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis() };
+    const maplibre = { Map: vi.fn(() => map), Marker: vi.fn(() => referenceMarker) };
+    const element = { setAttribute: vi.fn() }; const documentObject = { createElement: vi.fn(() => element) };
+    const initialized = createMapForDraft(maplibre, 'map-container', null, { latitude: 35.15, longitude: 140.31 }, documentObject);
+    expect(maplibre.Map).toHaveBeenCalledWith(expect.objectContaining({ center: [140.31, 35.15], zoom: 14 }));
+    expect(maplibre.Marker).toHaveBeenCalledWith({ element, anchor: 'bottom' });
+    expect(referenceMarker.setLngLat).toHaveBeenCalledWith([140.31, 35.15]);
+    expect(initialized.marker).toBeNull(); expect(initialized.referenceMarker).toBe(referenceMarker);
+  });
   it('provider設定を一箇所に集約する', () => {
     expect(MAP_STYLE_URL).toBe('https://tiles.openfreemap.org/styles/liberty'); expect(DEFAULT_MAP_VIEW).toEqual({ center: [139.7671, 35.6812], zoom: 8 });
   });
@@ -65,6 +85,7 @@ describe('MapPicker', () => {
     const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     expect(css).toContain('.map-picker{max-height:100dvh;min-height:0;overflow-y:auto}');
     expect(css).toContain('@media(max-height:500px)'); expect(css).toContain('.map-picker-actions{position:sticky;bottom:0');
+    expect(css).toContain('.ai-reference-guide');
   });
   it('JSとCSSの両方が成功してからload成功にする', async () => {
     const documentObject = fakeDocument(); const pending = loadMapLibre(documentObject); let settled = false; pending.then(() => { settled = true; });
