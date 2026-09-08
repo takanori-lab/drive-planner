@@ -602,5 +602,11 @@ describe('Place location', () => {
     expect(located.candidates[key][0].referenceLocation).toEqual(referenceLocation);
     const cleared = setCandidateLocation(located, key, candidate.id, null);
     expect(cleared.candidates[key][0]).toMatchObject({ location: null, referenceLocation });
+
+    const promoted = insertCandidate(located, 0, candidate.id);
+    expect(promoted.points[1]).toMatchObject({ location: { latitude: 35, longitude: 139 }, referenceLocation });
+    const clearedPoint = setPointLocation(promoted, candidate.id, null);
+    expect(clearedPoint.points[1]).toMatchObject({ location: null, referenceLocation });
+    expect(removePoint(clearedPoint, 1).candidates[key][0]).toMatchObject({ location: null, referenceLocation });
   });
 });

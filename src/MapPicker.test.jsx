@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { coordinateInputsFromLocation, createMapForDraft, MapPicker, locationFromCoordinateInputs } from './MapPicker';
+import { coordinateInputsFromLocation, createMapForDraft, isAiReferenceMarkerEvent, MapPicker, locationFromCoordinateInputs } from './MapPicker';
 import { DEFAULT_MAP_VIEW, MAP_STYLE_URL } from './map-config';
 import { loadMapLibre, resetMapLibreLoaderForTests } from './maplibre-adapter';
 
@@ -51,6 +51,11 @@ describe('MapPicker', () => {
     expect(coordinateInputsFromLocation({ latitude: 35.123, longitude: 140.456 })).toEqual({ latitude: '35.123', longitude: '140.456' });
     expect(coordinateInputsFromLocation(null)).toEqual({ latitude: '', longitude: '' });
   });
+  it('AI参考marker由来の地図clickを識別する', () => {
+    expect(isAiReferenceMarkerEvent({ originalEvent: { target: { closest: vi.fn(() => ({})) } } })).toBe(true);
+    expect(isAiReferenceMarkerEvent({ originalEvent: { target: { closest: vi.fn(() => null) } } })).toBe(false);
+    expect(isAiReferenceMarkerEvent({})).toBe(false);
+  });
   it('loader待機中に更新された最新draftで地図とmarkerを初期化する', async () => {
     let resolveLoader; let latestDraft = null;
     const loader = new Promise((resolve) => { resolveLoader = resolve; });
@@ -71,12 +76,15 @@ describe('MapPicker', () => {
   it('draftなしではAI参考位置を中心に専用markerを置き、通常markerとは分離する', () => {
     const map = {}; const referenceMarker = { setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis() };
     const maplibre = { Map: vi.fn(() => map), Marker: vi.fn(() => referenceMarker) };
-    const element = { setAttribute: vi.fn() }; const documentObject = { createElement: vi.fn(() => element) };
-    const initialized = createMapForDraft(maplibre, 'map-container', null, { latitude: 35.15, longitude: 140.31 }, documentObject);
+    let clickListener; const element = { setAttribute: vi.fn(), addEventListener: vi.fn((type, listener) => { if (type === 'click') clickListener = listener; }) };
+    const documentObject = { createElement: vi.fn(() => element) }; const onSelectReference = vi.fn();
+    const initialized = createMapForDraft(maplibre, 'map-container', null, { latitude: 35.15, longitude: 140.31 }, documentObject, onSelectReference);
     expect(maplibre.Map).toHaveBeenCalledWith(expect.objectContaining({ center: [140.31, 35.15], zoom: 14 }));
     expect(maplibre.Marker).toHaveBeenCalledWith({ element, anchor: 'bottom' });
     expect(referenceMarker.setLngLat).toHaveBeenCalledWith([140.31, 35.15]);
     expect(initialized.marker).toBeNull(); expect(initialized.referenceMarker).toBe(referenceMarker);
+    const event = { stopPropagation: vi.fn() }; clickListener(event);
+    expect(event.stopPropagation).toHaveBeenCalledOnce(); expect(onSelectReference).toHaveBeenCalledOnce();
   });
   it('provider設定を一箇所に集約する', () => {
     expect(MAP_STYLE_URL).toBe('https://tiles.openfreemap.org/styles/liberty'); expect(DEFAULT_MAP_VIEW).toEqual({ center: [139.7671, 35.6812], zoom: 8 });

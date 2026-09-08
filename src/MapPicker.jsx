@@ -13,7 +13,9 @@ export const coordinateInputsFromLocation = (location) => isValidLocation(locati
   ? { latitude: String(location.latitude), longitude: String(location.longitude) }
   : { latitude: '', longitude: '' };
 
-export function createMapForDraft(maplibre, container, draft, referenceLocation = null, documentObject = globalThis.document) {
+export const isAiReferenceMarkerEvent = (event) => Boolean(event?.originalEvent?.target?.closest?.('.ai-reference-marker'));
+
+export function createMapForDraft(maplibre, container, draft, referenceLocation = null, documentObject = globalThis.document, onSelectReference = () => undefined) {
   const hasDraft = isValidLocation(draft);
   const hasReferenceLocation = isValidLocation(referenceLocation);
   const initialView = hasDraft ? draft : hasReferenceLocation ? referenceLocation : null;
@@ -23,10 +25,16 @@ export function createMapForDraft(maplibre, container, draft, referenceLocation 
   const marker = hasDraft ? new maplibre.Marker().setLngLat([draft.longitude, draft.latitude]).addTo(map) : null;
   let referenceMarker = null;
   if (hasReferenceLocation) {
-    const element = documentObject.createElement('div');
+    const element = documentObject.createElement('button');
+    element.type = 'button';
     element.className = 'ai-reference-marker';
     element.textContent = 'AI参考位置';
-    element.setAttribute('aria-label', 'AI参考位置');
+    element.setAttribute('aria-label', 'AI参考位置を選択');
+    element.addEventListener('click', (event) => {
+      // MapLibreのgeneric clickへ伝播させず、参考座標そのものを選択する。
+      event.stopPropagation();
+      onSelectReference();
+    });
     referenceMarker = new maplibre.Marker({ element, anchor: 'bottom' })
       .setLngLat([referenceLocation.longitude, referenceLocation.latitude]).addTo(map);
   }
@@ -66,7 +74,7 @@ export function MapPicker({ place, onCancel, onConfirm, mapLoader = loadMapLibre
       if (disposed || !containerRef.current) return;
       maplibreRef.current = maplibre;
       const latestDraft = draftRef.current;
-      const initialized = createMapForDraft(maplibre, containerRef.current, latestDraft, referenceLocation);
+      const initialized = createMapForDraft(maplibre, containerRef.current, latestDraft, referenceLocation, globalThis.document, selectReferenceLocation);
       const map = initialized.map; markerRef.current = initialized.marker; referenceMarkerRef.current = initialized.referenceMarker;
       mapRef.current = map; map.addControl(new maplibre.NavigationControl(), 'top-right');
       const placeMapMarker = (location) => {
@@ -74,6 +82,7 @@ export function MapPicker({ place, onCancel, onConfirm, mapLoader = loadMapLibre
         markerRef.current = new maplibre.Marker().setLngLat([location.longitude, location.latitude]).addTo(map);
       };
       map.on('click', (event) => {
+        if (isAiReferenceMarkerEvent(event)) return;
         const location = { latitude: event.lngLat.lat, longitude: event.lngLat.lng };
         const inputs = coordinateInputsFromLocation(location);
         draftRef.current = location; setDraft(location); setLatitudeInput(inputs.latitude); setLongitudeInput(inputs.longitude); placeMapMarker(location);
