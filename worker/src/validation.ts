@@ -84,10 +84,10 @@ function object(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function exactKeys(value: Record<string, unknown>, keys: string[], path: string): void {
+function exactKeys(value: Record<string, unknown>, keys: string[], path: string, optional: string[] = []): void {
   const unknown = Object.keys(value).find((key) => !keys.includes(key));
   if (unknown) invalid(`${path}.${unknown} は指定できません。`);
-  const missing = keys.find((key) => !(key in value));
+  const missing = keys.find((key) => !(key in value) && !optional.includes(key));
   if (missing) invalid(`${path}.${missing} は必須です。`);
 }
 
@@ -122,7 +122,7 @@ function validDate(value: string): boolean {
 
 export function validateSegmentCandidatesRequest(value: unknown): SegmentCandidatesRequest {
   const root = object(value, 'body');
-  exactKeys(root, ['requestId', 'plan', 'segment', 'routeContext', 'existingCandidates', 'preferences'], 'body');
+  exactKeys(root, ['requestId', 'plan', 'segment', 'routeContext', 'existingCandidates', 'preferences'], 'body', ['routeContext']);
 
   const requestId = string(root.requestId, 'requestId', 100);
   const plan = object(root.plan, 'plan');
@@ -159,7 +159,10 @@ export function validateSegmentCandidatesRequest(value: unknown): SegmentCandida
       before: place(segment.before, 'segment.before'),
       after: place(segment.after, 'segment.after'),
     },
-    routeContext: routeContext(root.routeContext),
+    routeContext: root.routeContext === undefined ? {
+      source: 'geographic_inference', routingCondition: 'recommended', distanceMeters: null,
+      durationSeconds: null, majorRoads: [], sampledCoordinates: [],
+    } : routeContext(root.routeContext),
     existingCandidates,
     preferences: {
       freeText: string(preferences.freeText, 'preferences.freeText', 1000, true),

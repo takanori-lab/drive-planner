@@ -259,6 +259,8 @@ describe('Drive Planner Worker', () => {
     expect(request.instructions).toBe(INSTRUCTIONS);
     for (const rule of [
       'routeContext.sourceがors',
+      '始終点位置をA/B特定の根拠とし',
+      '文字情報が曖昧という理由だけでneeds_clarificationにしません',
       'MAINを経由地点や探索経路として扱いません',
       'freeTextは「何を探すか」へ強く反映しても探索範囲を変えません',
       '「ラーメン以外も」「ラーメンだけでなく」はラーメンを含めた多様化',
@@ -285,6 +287,19 @@ describe('Drive Planner Worker', () => {
     expect(sent).toEqual({ ...fixture(), resolvedGoogleMapsContext: {} });
     expect(request.input).not.toContain('localStorage');
     expect(request.input).not.toContain('internalId');
+  });
+
+  it('旧FrontendのrouteContextなし入力を地理推定として受け付ける', async () => {
+    const env = environment();
+    const legacyInput = fixture() as Record<string, unknown>;
+    delete legacyInput.routeContext;
+    const response = await handleRequest(post(aiEndpoint, legacyInput, { Authorization: await authorization(env) }), env);
+    expect(response.status).toBe(200);
+    const openAiRequest = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(JSON.parse(openAiRequest.input).routeContext).toEqual({
+      source: 'geographic_inference', routingCondition: 'recommended', distanceMeters: null,
+      durationSeconds: null, majorRoads: [], sampledCoordinates: [],
+    });
   });
 
   it('解決したGoogle Maps地点情報をOpenAI入力へ追加し、GoogleへSecretを送らない', async () => {

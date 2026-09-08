@@ -13,6 +13,11 @@ const placeForRequest = (place = {}) => ({
   memo: place.memo ?? '',
 });
 
+const boundedMajorRoads = (roads) => (Array.isArray(roads) ? roads : [])
+  .filter((road) => typeof road === 'string' && road.trim())
+  .slice(0, 20)
+  .map((road) => road.slice(0, 120));
+
 export function sampleRouteCoordinates(geometry, maximum = 20) {
   if (geometry?.type !== 'LineString' || !Array.isArray(geometry.coordinates) || geometry.coordinates.length < 2) return [];
   const coordinates = geometry.coordinates;
@@ -36,7 +41,7 @@ export function buildRouteContext(before, after, routeResult, routingCondition) 
       source: 'ors', routingCondition,
       distanceMeters: routeResult.distanceMeters,
       durationSeconds: routeResult.durationSeconds,
-      majorRoads: Array.isArray(routeResult.majorRoads) ? routeResult.majorRoads.slice(0, 20) : [],
+      majorRoads: boundedMajorRoads(routeResult.majorRoads),
       sampledCoordinates,
     };
   }
@@ -122,12 +127,16 @@ export async function createSession(passcode, { fetchImpl = fetch, baseUrl = API
 }
 
 export async function fetchAiCandidates(token, body, { fetchImpl = fetch, baseUrl = API_BASE_URL } = {}) {
-  const response = await fetchImpl(`${baseUrl}/v1/ai/segment-candidates`, {
+  const request = (requestBody) => fetchImpl(`${baseUrl}/v1/ai/segment-candidates`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
-  return parseResponse(response);
+  const response = await request(body);
+  if (response.status !== 400 || !Object.hasOwn(body ?? {}, 'routeContext')) return parseResponse(response);
+  // routeContext導入前のWorkerとのデプロイ順互換。旧Workerは未知フィールドを400で拒否する。
+  const { routeContext: _routeContext, ...legacyBody } = body;
+  return parseResponse(await request(legacyBody));
 }
 
 export function buildRoutingRequestBody(before, after, condition, createRequestId = () => crypto.randomUUID()) {

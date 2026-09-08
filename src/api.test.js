@@ -44,6 +44,17 @@ describe('AI request body', () => {
     expect(body.routeContext.sampledCoordinates[10].longitude).toBeLessThan(130.7);
   });
 
+  it('majorRoadsをWorker契約に合わせて件数・文字数ともboundedにする', () => {
+    const routeResult = { status: 'ok', distanceMeters: 1, durationSeconds: 1,
+      majorRoads: [...Array.from({ length: 20 }, (_, index) => `道路${index}`), '余分な道路', 123, ''],
+      geometry: { type: 'LineString', coordinates: [[130, 30], [131, 31]] } };
+    routeResult.majorRoads[0] = '道'.repeat(121);
+    const roads = buildAiRequestBody(plan, 0, '', () => 'request', routeResult).routeContext.majorRoads;
+    expect(roads).toHaveLength(20);
+    expect(roads[0]).toHaveLength(120);
+    expect(roads).not.toContain('余分な道路');
+  });
+
   it.each([
     [undefined, 'routeResult未取得'], [{ status: 'loading' }, 'loading'], [{ status: 'error' }, 'error'],
     [{ status: 'ok', geometry: null }, 'geometryなし'], [{ status: 'ok', geometry: { type: 'LineString', coordinates: [[181, 35], [139, 36]] } }, '不正geometry'],
@@ -95,6 +106,16 @@ it('AI APIはBearer tokenをheaderだけに付ける', async () => {
   const options = fetchImpl.mock.calls[0][1];
   expect(options.headers.Authorization).toBe('Bearer session-secret');
   expect(options.body).not.toContain('session-secret');
+});
+
+it('旧WorkerがrouteContextを拒否した場合だけlegacy bodyで再試行する', async () => {
+  const fetchImpl = vi.fn()
+    .mockResolvedValueOnce(Response.json({ status: 'error', error: { code: 'invalid_request' } }, { status: 400 }))
+    .mockResolvedValueOnce(Response.json({ status: 'ok', candidates: [] }));
+  await fetchAiCandidates('session-secret', { requestId: 'r', routeContext: { source: 'ors' } }, { fetchImpl, baseUrl: 'https://worker.test' });
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toHaveProperty('routeContext');
+  expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).not.toHaveProperty('routeContext');
 });
 
 it('HTTP error contractをraw messageなしで安全にparseする', async () => {
