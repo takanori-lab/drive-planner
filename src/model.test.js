@@ -593,4 +593,20 @@ describe('Place location', () => {
     expect(insertCandidate(located, 0, candidate.id).points[1].location).toEqual({ latitude: 35, longitude: 139 });
     expect(insertCandidate(withCandidate, 0, candidate.id).points[1].location).toBeNull();
   });
+  it('candidateのlocationを確定・解除してもAI参考位置を保持する', () => {
+    const base = initialPlan(); const key = segmentKey(base.points[0], base.points[1]);
+    const referenceLocation = { latitude: 35.5, longitude: 138.7 };
+    const candidate = { id: 'candidate', name: '候補', location: null, referenceLocation };
+    const withCandidate = { ...base, candidates: { [key]: [candidate] } };
+    const located = setCandidateLocation(withCandidate, key, candidate.id, { latitude: 35, longitude: 139 });
+    expect(located.candidates[key][0].referenceLocation).toEqual(referenceLocation);
+    const cleared = setCandidateLocation(located, key, candidate.id, null);
+    expect(cleared.candidates[key][0]).toMatchObject({ location: null, referenceLocation });
+
+    const promoted = insertCandidate(located, 0, candidate.id);
+    expect(promoted.points[1]).toMatchObject({ location: { latitude: 35, longitude: 139 }, referenceLocation });
+    const clearedPoint = setPointLocation(promoted, candidate.id, null);
+    expect(clearedPoint.points[1]).toMatchObject({ location: null, referenceLocation });
+    expect(removePoint(clearedPoint, 1).candidates[key][0]).toMatchObject({ location: null, referenceLocation });
+  });
 });

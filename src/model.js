@@ -318,7 +318,8 @@ export function insertCandidate(plan, segmentIndex, candidateId) {
   const oldKey = segmentKey(before, after);
   const candidate = (plan.candidates[oldKey] || []).find((item) => item.id === candidateId);
   if (!candidate) return plan;
-  const point = { id: candidate.id, name: candidate.name, googleMapsUrl: candidate.googleMapsUrl ?? '', locationNote: candidate.locationNote ?? '', memo: candidate.memo || '', location: normalizeLocation(candidate.location) };
+  const point = { id: candidate.id, name: candidate.name, googleMapsUrl: candidate.googleMapsUrl ?? '', locationNote: candidate.locationNote ?? '', memo: candidate.memo || '', location: normalizeLocation(candidate.location),
+    ...(Object.hasOwn(candidate, 'referenceLocation') ? { referenceLocation: normalizeLocation(candidate.referenceLocation) } : {}) };
   const points = [...plan.points.slice(0, segmentIndex + 1), point, ...plan.points.slice(segmentIndex + 1)];
   const rest = (plan.candidates[oldKey] || []).filter((item) => item.id !== candidateId);
   const candidates = { ...plan.candidates };
@@ -374,7 +375,8 @@ export function removePoint(plan, pointIndex) {
   const rightKey = segmentKey(point, after);
   const merged = [
     ...(plan.candidates[leftKey] || []),
-    { id: makeId(), name: point.name, googleMapsUrl: point.googleMapsUrl ?? '', locationNote: point.locationNote ?? '', memo: point.memo ?? '', location: normalizeLocation(point.location) },
+    { id: makeId(), name: point.name, googleMapsUrl: point.googleMapsUrl ?? '', locationNote: point.locationNote ?? '', memo: point.memo ?? '', location: normalizeLocation(point.location),
+      ...(Object.hasOwn(point, 'referenceLocation') ? { referenceLocation: normalizeLocation(point.referenceLocation) } : {}) },
     ...(plan.candidates[rightKey] || []),
   ];
   const candidates = { ...plan.candidates };

@@ -136,7 +136,7 @@ it('routing requestにはユーザー指定座標だけを入れる', () => {
   const before = { name: '東京駅', googleMapsUrl: 'https://example.test', locationNote: '丸の内', location: { latitude: 35.681, longitude: 139.767 } };
   const after = { name: '勝浦駅', location: { latitude: 35.153, longitude: 140.312 } };
   expect(buildRoutingRequestBody(before, after, 'recommended', () => 'request')).toEqual({ requestId: 'request', condition: 'recommended', before: before.location, after: after.location });
-  expect(() => buildRoutingRequestBody({ ...before, location: null }, after, 'recommended')).toThrow();
+  expect(() => buildRoutingRequestBody({ ...before, location: null, referenceLocation: before.location }, after, 'recommended')).toThrow();
   expect(() => buildRoutingRequestBody(before, { ...after, location: { latitude: 35, longitude: 181 } }, 'recommended')).toThrow();
 });
 

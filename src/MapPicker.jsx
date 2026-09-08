@@ -13,18 +13,39 @@ export const coordinateInputsFromLocation = (location) => isValidLocation(locati
   ? { latitude: String(location.latitude), longitude: String(location.longitude) }
   : { latitude: '', longitude: '' };
 
-export function createMapForDraft(maplibre, container, draft) {
+export const isAiReferenceMarkerEvent = (event) => Boolean(event?.originalEvent?.target?.closest?.('.ai-reference-marker'));
+
+export function createMapForDraft(maplibre, container, draft, referenceLocation = null, documentObject = globalThis.document, onSelectReference = () => undefined) {
   const hasDraft = isValidLocation(draft);
+  const hasReferenceLocation = isValidLocation(referenceLocation);
+  const initialView = hasDraft ? draft : hasReferenceLocation ? referenceLocation : null;
   const map = new maplibre.Map({ container, style: MAP_STYLE_URL,
-    center: hasDraft ? [draft.longitude, draft.latitude] : DEFAULT_MAP_VIEW.center,
-    zoom: hasDraft ? 14 : DEFAULT_MAP_VIEW.zoom, attributionControl: true });
+    center: initialView ? [initialView.longitude, initialView.latitude] : DEFAULT_MAP_VIEW.center,
+    zoom: initialView ? 14 : DEFAULT_MAP_VIEW.zoom, attributionControl: true });
   const marker = hasDraft ? new maplibre.Marker().setLngLat([draft.longitude, draft.latitude]).addTo(map) : null;
-  return { map, marker };
+  let referenceMarker = null;
+  if (hasReferenceLocation) {
+    const element = documentObject.createElement('button');
+    element.type = 'button';
+    element.className = 'ai-reference-marker';
+    element.textContent = 'AI参考位置';
+    element.setAttribute('aria-label', 'AI参考位置を選択');
+    element.addEventListener('click', (event) => {
+      // MapLibreのgeneric clickへ伝播させず、参考座標そのものを選択する。
+      event.stopPropagation();
+      onSelectReference();
+    });
+    referenceMarker = new maplibre.Marker({ element, anchor: 'bottom' })
+      .setLngLat([referenceLocation.longitude, referenceLocation.latitude]).addTo(map);
+  }
+  return { map, marker, referenceMarker };
 }
 
 export function MapPicker({ place, onCancel, onConfirm, mapLoader = loadMapLibre }) {
-  const containerRef = useRef(null); const mapRef = useRef(null); const markerRef = useRef(null); const maplibreRef = useRef(null);
+  const containerRef = useRef(null); const mapRef = useRef(null); const markerRef = useRef(null); const referenceMarkerRef = useRef(null); const maplibreRef = useRef(null);
   const initialLocation = isValidLocation(place.location) ? place.location : null;
+  // 確定済み座標がある場合、AI参考座標は表示にもdraftにも利用しない。
+  const referenceLocation = !initialLocation && isValidLocation(place.referenceLocation) ? place.referenceLocation : null;
   const initialInputs = coordinateInputsFromLocation(initialLocation);
   const [draft, setDraft] = useState(initialLocation);
   const draftRef = useRef(initialLocation);
@@ -41,32 +62,43 @@ export function MapPicker({ place, onCancel, onConfirm, mapLoader = loadMapLibre
     const location = locationFromCoordinateInputs(latitude, longitude);
     draftRef.current = location; setDraft(location); placeMarker(location);
   };
+  const selectReferenceLocation = () => {
+    if (!referenceLocation) return;
+    const location = { latitude: referenceLocation.latitude, longitude: referenceLocation.longitude };
+    const inputs = coordinateInputsFromLocation(location);
+    draftRef.current = location; setDraft(location); setLatitudeInput(inputs.latitude); setLongitudeInput(inputs.longitude); placeMarker(location);
+  };
   useEffect(() => {
     let disposed = false;
     mapLoader().then((maplibre) => {
       if (disposed || !containerRef.current) return;
       maplibreRef.current = maplibre;
       const latestDraft = draftRef.current;
-      const initialized = createMapForDraft(maplibre, containerRef.current, latestDraft);
-      const map = initialized.map; markerRef.current = initialized.marker;
+      const initialized = createMapForDraft(maplibre, containerRef.current, latestDraft, referenceLocation, globalThis.document, selectReferenceLocation);
+      const map = initialized.map; markerRef.current = initialized.marker; referenceMarkerRef.current = initialized.referenceMarker;
       mapRef.current = map; map.addControl(new maplibre.NavigationControl(), 'top-right');
       const placeMapMarker = (location) => {
         markerRef.current?.remove();
         markerRef.current = new maplibre.Marker().setLngLat([location.longitude, location.latitude]).addTo(map);
       };
       map.on('click', (event) => {
+        if (isAiReferenceMarkerEvent(event)) return;
         const location = { latitude: event.lngLat.lat, longitude: event.lngLat.lng };
         const inputs = coordinateInputsFromLocation(location);
         draftRef.current = location; setDraft(location); setLatitudeInput(inputs.latitude); setLongitudeInput(inputs.longitude); placeMapMarker(location);
       });
       map.on('error', () => setError('地図を読み込めませんでした。時間をおいて再度お試しください。'));
     }).catch(() => !disposed && setError('地図を表示できません。その他の編集はそのまま利用できます。'));
-    return () => { disposed = true; markerRef.current?.remove(); mapRef.current?.remove(); };
+    return () => { disposed = true; markerRef.current?.remove(); referenceMarkerRef.current?.remove(); mapRef.current?.remove(); };
   }, [mapLoader]);
   return <div className="map-picker-backdrop" role="presentation">
     <section className="map-picker" role="dialog" aria-modal="true" aria-labelledby="map-picker-title">
       <header><div><span className="eyebrow">SELECT A PLACE</span><h2 id="map-picker-title">{place.name}の場所</h2></div><button type="button" className="close" aria-label="キャンセル" onClick={onCancel}>×</button></header>
       <p>地図をタップしてピンを置いてください。</p>
+      {referenceLocation && <aside className="ai-reference-guide">
+        <p><strong>AI参考位置</strong><br />AIによる参考位置です。正しい場所か地図で確認してください。</p>
+        <button type="button" className="secondary" onClick={selectReferenceLocation}>この参考位置を選択</button>
+      </aside>}
       <div className="map-canvas" ref={containerRef} aria-label="場所を指定する地図" />
       {error && <p className="map-error" role="alert">{error}</p>}
       <details className="coordinate-inputs">
